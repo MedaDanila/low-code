@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
 import UiButton from '../../shared/ui/UiButton.vue'
+import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiInput from '../../shared/ui/UiInput.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import UiTable from '../../shared/ui/UiTable.vue'
@@ -64,14 +65,14 @@ async function save() {
 
 <template>
   <div>
-    <UiPageHeader title="Роли" description="System permissions and entity permissions." />
+    <UiPageHeader title="Роли" description="Системные права и права по сущностям." />
     <section class="split-layout">
       <div class="panel">
         <UiTable
           :rows="rows"
           :columns="[
-            { field: 'name', header: 'Role' },
-            { field: 'permissions', header: 'Permissions' },
+            { field: 'name', header: 'Роль' },
+            { field: 'permissions', header: 'Права' },
           ]"
           @row-click="select"
         />
@@ -80,11 +81,16 @@ async function save() {
         <div class="form-grid">
           <div class="form-field"><label>Название</label><UiInput v-model="editable.name" /></div>
         </div>
-        <h3 class="surface-title">Entity permissions</h3>
-        <table class="permission-table">
+        <h3 class="surface-title">Права по сущностям</h3>
+        <UiEmptyState
+          v-if="entityPermissions.length === 0"
+          title="Сущностей пока нет"
+          description="Права по сущностям появятся после создания и публикации сущностей."
+        />
+        <table v-else class="permission-table">
           <thead>
             <tr>
-              <th>Entity</th><th>View</th><th>Create</th><th>Edit</th><th>Delete</th><th>Transition</th>
+              <th>Сущность</th><th>Просмотр</th><th>Создание</th><th>Редактирование</th><th>Удаление</th><th>Переход</th>
             </tr>
           </thead>
           <tbody>

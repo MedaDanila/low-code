@@ -16,6 +16,7 @@ const emit = defineEmits<{
 <template>
   <div class="layer-panel">
     <h3>Слои</h3>
+    <p v-if="layers.length === 0" class="muted">Слои появятся после публикации сущностей с геометрией.</p>
     <div v-for="layer in layers" :key="layer.id" class="layer-panel__item">
       <label>
         <input

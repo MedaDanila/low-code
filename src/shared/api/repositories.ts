@@ -14,6 +14,8 @@ import type {
   DictionaryItem,
   EntityObject,
   EntityObjectValues,
+  EntityMapSettings,
+  EntityMapStyle,
   EntitySchema,
   GeoRule,
   GeoValidationResult,
@@ -32,6 +34,19 @@ const STORAGE_KEY = 'low-code-gis-platform-db-v1'
 const latencyRange = [220, 480] as const
 const SUMMARY_WIDTH_STEP_PX = 10
 const SUMMARY_DEFAULT_WIDTH_PX = 220
+const DEMO_ENTITY_IDS = new Set(['ent_orders', 'ent_warranty', 'ent_playgrounds'])
+const DEMO_ENTITY_CODES = new Set(['orders', 'warranty_areas', 'playgrounds'])
+const DEMO_DICTIONARY_IDS = new Set(['dict_work_types', 'dict_playground_condition', 'dict_parking_type'])
+const DEMO_DICTIONARY_CODES = new Set(['work_types', 'playground_condition', 'parking_type'])
+const DEMO_USER_IDS = new Set(['usr_operator', 'usr_manager', 'usr_viewer'])
+const DEMO_ROLE_IDS = new Set(['role_operator', 'role_manager', 'role_viewer'])
+const DEMO_ORGANIZATION_IDS = new Set(['org_city', 'org_ati', 'org_transport', 'org_housing', 'org_property'])
+const DEMO_WORKFLOW_IDS = new Set(['wf_orders'])
+const DEMO_GEO_RULE_IDS = new Set(['geo_warranty_intersects'])
+const DEMO_LAYER_IDS = new Set(['layer_orders', 'layer_warranty', 'layer_playgrounds'])
+const DEMO_TASK_IDS = new Set(['task_order_1441'])
+const DEMO_ATTACHMENT_IDS = new Set(['att_1', 'att_2', 'att_3', 'att_4'])
+const DEMO_AUDIT_IDS = new Set(['aud_1', 'aud_2', 'aud_3', 'aud_4'])
 const LEGACY_SUMMARY_WIDTHS: Record<string, number> = {
   small: 220,
   medium: 460,
@@ -43,11 +58,16 @@ type StoredSummaryBlock = Omit<DashboardSummaryBlock, 'widthPx'> & {
   width?: keyof typeof LEGACY_SUMMARY_WIDTHS
 }
 
+type StoredMapSettings = Partial<Omit<EntityMapSettings, 'styles'>> & {
+  style?: Partial<EntityMapStyle>
+  styles?: Partial<Record<EntityMapSettings['enabledGeometryTypes'][number], Partial<EntityMapStyle>>>
+}
+
 export interface CreateEntitySchemaInput {
   name: string
   code?: string
   description?: string
-  geometryType: GeometryType
+  geometryType?: GeometryType
 }
 
 export interface CreateEntityObjectInput {
@@ -102,8 +122,9 @@ export const repositories = {
         code: uniqueSystemCode(input.name, db.entitySchemas.map((item) => item.code), 'entity'),
         name: input.name,
         description: input.description,
-        geometryType: input.geometryType,
-        fields: [],
+        geometryType: input.geometryType ?? 'point',
+        mapSettings: defaultMapSettings(),
+        fields: [defaultAddressField()],
         status: 'draft',
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -120,6 +141,7 @@ export const repositories = {
       const updated: EntitySchema = { ...normalized, updatedAt: nowIso() }
       migrateEntityObjectFieldCodes(db, updated.id, fieldCodeChanges)
       db.entitySchemas = db.entitySchemas.map((item) => (item.id === schema.id ? updated : item))
+      syncLayerWithMapSettings(db, updated)
       writeDb(db)
       await delay()
       return updated
@@ -127,7 +149,7 @@ export const repositories = {
     async publish(id: string) {
       const db = readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
-      if (!schema) throw new Error('Entity schema not found')
+      if (!schema) throw new Error('Схема сущности не найдена')
       schema.status = 'active'
       schema.updatedAt = nowIso()
       grantDefaultPermissions(db, schema.id)
@@ -140,7 +162,7 @@ export const repositories = {
     async archive(id: string) {
       const db = readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
-      if (!schema) throw new Error('Entity schema not found')
+      if (!schema) throw new Error('Схема сущности не найдена')
       schema.status = 'archived'
       schema.updatedAt = nowIso()
       writeDb(db)
@@ -150,12 +172,12 @@ export const repositories = {
     async duplicate(id: string) {
       const db = readDb()
       const source = db.entitySchemas.find((item) => item.id === id)
-      if (!source) throw new Error('Entity schema not found')
+      if (!source) throw new Error('Схема сущности не найдена')
       const timestamp = nowIso()
       const copy: EntitySchema = {
         ...source,
         id: createId('ent'),
-        name: `${source.name} copy`,
+        name: `${source.name} копия`,
         code: uniqueSystemCode(`${source.name} copy`, db.entitySchemas.map((schema) => schema.code), 'entity'),
         status: 'draft',
         fields: source.fields.map((field) => ({ ...field, id: createId('fld') })),
@@ -167,6 +189,34 @@ export const repositories = {
       writeDb(db)
       await delay()
       return copy
+    },
+    async delete(id: string) {
+      const db = readDb()
+      const schema = db.entitySchemas.find((item) => item.id === id)
+      if (!schema) throw new Error('Схема сущности не найдена')
+
+      db.entitySchemas = db.entitySchemas.filter((item) => item.id !== id)
+      db.entityObjects = db.entityObjects.filter((object) => object.entityId !== id)
+      db.dictionaries = db.dictionaries.filter((dictionary) => dictionary.entityId !== id)
+      db.workflows = db.workflows.filter((workflow) => workflow.entityId !== id)
+      db.geoRules = db.geoRules.filter((rule) => rule.entityId !== id && rule.targetEntityId !== id)
+      db.layers = db.layers.filter((layer) => layer.entityId !== id)
+      db.tasks = db.tasks.filter((task) => task.entityId !== id)
+      db.attachments = db.attachments.filter((attachment) => attachment.entityId !== id)
+      db.auditEvents = db.auditEvents.filter((event) => event.entityId !== id)
+      db.roles = db.roles.map((role) => ({
+        ...role,
+        permissions: role.permissions.filter((permission) => permission.entityId !== id),
+      }))
+      db.userSettings = db.userSettings.map((settings) => ({
+        ...settings,
+        home: {
+          summaryBlocks: settings.home.summaryBlocks.filter((block) => block.entityId !== id),
+        },
+      }))
+
+      writeDb(db)
+      await delay()
     },
   },
 
@@ -213,10 +263,44 @@ export const repositories = {
       await delay()
       return object
     },
+    async createMany(inputs: CreateEntityObjectInput[]) {
+      const db = readDb()
+      const created: EntityObject[] = []
+      inputs.forEach((input) => {
+        const workflow = db.workflows.find((item) => item.entityId === input.entityId && item.status === 'active')
+        const initialState = workflow?.states.find((state) => state.initial)
+        const timestamp = nowIso()
+        const object: EntityObject = {
+          id: createId('obj'),
+          entityId: input.entityId,
+          values: input.values,
+          geometry: input.geometry,
+          status: initialState?.code ?? 'active',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          createdBy: input.actorId,
+          updatedBy: input.actorId,
+        }
+        db.entityObjects.push(object)
+        db.auditEvents.unshift({
+          id: createId('aud'),
+          entityId: object.entityId,
+          objectId: object.id,
+          at: timestamp,
+          actorId: input.actorId,
+          kind: 'change',
+          title: 'Создан объект импортом',
+        })
+        created.push(object)
+      })
+      writeDb(db)
+      await delay()
+      return created
+    },
     async update(input: UpdateEntityObjectInput) {
       const db = readDb()
       const object = db.entityObjects.find((item) => item.id === input.id)
-      if (!object) throw new Error('Entity object not found')
+      if (!object) throw new Error('Объект сущности не найден')
       object.values = input.values
       object.geometry = input.geometry
       object.updatedAt = nowIso()
@@ -273,7 +357,7 @@ export const repositories = {
     async addItem(dictionaryId: string, name: string) {
       const db = readDb()
       const dictionary = db.dictionaries.find((item) => item.id === dictionaryId)
-      if (!dictionary) throw new Error('Dictionary not found')
+      if (!dictionary) throw new Error('Справочник не найден')
       const item: DictionaryItem = {
         id: createId('di'),
         code: uniqueSystemCode(name, dictionary.items.map((candidate) => candidate.code), 'value'),
@@ -370,10 +454,10 @@ export const repositories = {
     async applyTransition(objectId: string, transitionId: string, actorId: string) {
       const db = readDb()
       const object = db.entityObjects.find((item) => item.id === objectId)
-      if (!object) throw new Error('Entity object not found')
+      if (!object) throw new Error('Объект сущности не найден')
       const workflow = db.workflows.find((item) => item.entityId === object.entityId && item.status === 'active')
       const transition = workflow?.transitions.find((item) => item.id === transitionId)
-      if (!workflow || !transition) throw new Error('Workflow transition not found')
+      if (!workflow || !transition) throw new Error('Переход процесса не найден')
       const nextState = workflow.states.find((state) => state.id === transition.toStateId)
       const previous = object.status ?? 'draft'
       object.status = nextState?.code ?? previous
@@ -386,7 +470,7 @@ export const repositories = {
         at: object.updatedAt,
         actorId,
         kind: 'workflow',
-        title: `Статус: ${previous} → ${object.status}`,
+        title: `Статус: ${workflow.states.find((state) => state.code === previous)?.name ?? previous} → ${nextState?.name ?? object.status}`,
         details: transition.name,
       })
       if (object.status === 'review') {
@@ -486,7 +570,7 @@ export const repositories = {
         entityId,
         objectId,
         name,
-        type: name.split('.').pop()?.toUpperCase() ?? 'FILE',
+        type: name.split('.').pop()?.toUpperCase() ?? 'Файл',
         date: nowIso(),
         authorId: actorId,
         size: '128 КБ',
@@ -576,26 +660,161 @@ function readDb(): AppDatabase {
 
 function writeDb(db: AppDatabase): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+  publishGeneratedApiSnapshot(db)
+}
+
+let snapshotPublishScheduled = false
+let pendingGeneratedApiSnapshot: AppDatabase | null = null
+
+function publishGeneratedApiSnapshot(db: AppDatabase): void {
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return
+  pendingGeneratedApiSnapshot = db
+  if (snapshotPublishScheduled) return
+
+  snapshotPublishScheduled = true
+  window.setTimeout(() => {
+    snapshotPublishScheduled = false
+    const snapshot = pendingGeneratedApiSnapshot
+    pendingGeneratedApiSnapshot = null
+    if (!snapshot) return
+
+    void fetch('/api/v1/__runtime/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(snapshot),
+    }).catch(() => undefined)
+  }, 0)
 }
 
 function migrateDb(db: AppDatabase): AppDatabase {
+  const seed = createSeedDatabase()
   const dictionaryEntityByCode: Record<string, string> = {
     work_types: 'ent_orders',
     playground_condition: 'ent_playgrounds',
     parking_type: 'ent_orders',
   }
-  const fallbackEntityId = db.entitySchemas[0]?.id ?? 'ent_orders'
-  const migrated: AppDatabase = {
+  const roleNamesByCode: Record<string, string> = {
+    admin: 'Администратор',
+    operator: 'Оператор',
+    manager: 'Руководитель',
+    viewer: 'Наблюдатель',
+  }
+  const settings = db.settings ?? seed.settings
+  const fallbackEntityId = db.entitySchemas[0]?.id ?? ''
+  const migrated = removeDefaultDemoData({
     ...db,
-    dictionaries: db.dictionaries.map((dictionary) => ({
+    entitySchemas: (db.entitySchemas ?? []).map((schema) => normalizeEntityMapSettings(schema)),
+    entityObjects: db.entityObjects ?? [],
+    dictionaries: (db.dictionaries ?? []).map((dictionary) => ({
       ...dictionary,
       entityId: dictionary.entityId ?? dictionaryEntityByCode[dictionary.code] ?? fallbackEntityId,
     })),
+    users: db.users ?? [],
+    roles: (db.roles ?? []).map((role) => ({ ...role, name: roleNamesByCode[role.code] ?? role.name })),
+    organizations: db.organizations ?? [],
+    workflows: db.workflows ?? [],
+    tasks: db.tasks ?? [],
+    geoRules: db.geoRules ?? [],
+    layers: db.layers ?? [],
+    attachments: db.attachments ?? [],
+    auditEvents: db.auditEvents ?? [],
+    settings: {
+      ...settings,
+      platformName: settings.platformName === 'Low-code GIS Platform' ? 'Муниципальная платформа' : settings.platformName,
+      municipalityName: settings.municipalityName === 'Нижний Новгород' ? 'Муниципалитет' : settings.municipalityName,
+    },
     userSettings: db.userSettings ?? [],
-  }
+  })
+  ensureSystemBootstrap(migrated)
   migrated.users.forEach((user) => ensureUserSettings(migrated, user.id))
   migrated.userSettings = migrated.userSettings.map((settings) => normalizeUserSettings(settings, migrated))
   return migrated
+}
+
+function removeDefaultDemoData(db: AppDatabase): AppDatabase {
+  const removedEntityIds = new Set(
+    db.entitySchemas
+      .filter((schema) => DEMO_ENTITY_IDS.has(schema.id) || DEMO_ENTITY_CODES.has(schema.code))
+      .map((schema) => schema.id),
+  )
+
+  const entitySchemas = db.entitySchemas.filter((schema) => !removedEntityIds.has(schema.id))
+  const remainingEntityIds = new Set(entitySchemas.map((schema) => schema.id))
+  const users = db.users.filter((user) => !DEMO_USER_IDS.has(user.id))
+
+  return {
+    ...db,
+    entitySchemas,
+    entityObjects: db.entityObjects.filter((object) => !removedEntityIds.has(object.entityId)),
+    dictionaries: db.dictionaries.filter((dictionary) =>
+      !removedEntityIds.has(dictionary.entityId)
+      && !DEMO_DICTIONARY_IDS.has(dictionary.id)
+      && !DEMO_DICTIONARY_CODES.has(dictionary.code),
+    ),
+    users,
+    roles: db.roles
+      .filter((role) => !DEMO_ROLE_IDS.has(role.id))
+      .map((role) => ({
+        ...role,
+        permissions: role.permissions.filter((permission) => !permission.entityId || remainingEntityIds.has(permission.entityId)),
+      })),
+    organizations: db.organizations.filter((organization) => !DEMO_ORGANIZATION_IDS.has(organization.id)),
+    workflows: db.workflows.filter((workflow) => !removedEntityIds.has(workflow.entityId) && !DEMO_WORKFLOW_IDS.has(workflow.id)),
+    tasks: db.tasks.filter((task) => !removedEntityIds.has(task.entityId) && !DEMO_TASK_IDS.has(task.id)),
+    geoRules: db.geoRules.filter((rule) =>
+      !removedEntityIds.has(rule.entityId)
+      && !removedEntityIds.has(rule.targetEntityId)
+      && !DEMO_GEO_RULE_IDS.has(rule.id),
+    ),
+    layers: db.layers.filter((layer) => !removedEntityIds.has(layer.entityId) && !DEMO_LAYER_IDS.has(layer.id)),
+    attachments: db.attachments.filter((attachment) => !removedEntityIds.has(attachment.entityId) && !DEMO_ATTACHMENT_IDS.has(attachment.id)),
+    auditEvents: db.auditEvents.filter((event) => !removedEntityIds.has(event.entityId) && !DEMO_AUDIT_IDS.has(event.id)),
+    userSettings: db.userSettings.filter((settings) => users.some((user) => user.id === settings.userId)),
+  }
+}
+
+function ensureSystemBootstrap(db: AppDatabase): void {
+  if (!db.organizations.some((organization) => organization.id === 'org_system')) {
+    db.organizations.unshift({ id: 'org_system', name: 'Система' })
+  }
+
+  let adminRole = db.roles.find((role) => role.id === 'role_admin' || role.code === 'admin')
+  if (!adminRole) {
+    adminRole = {
+      id: 'role_admin',
+      code: 'admin',
+      name: 'Администратор',
+      permissions: [],
+    }
+    db.roles.unshift(adminRole)
+  }
+  adminRole.id = 'role_admin'
+  adminRole.code = 'admin'
+  adminRole.name = adminRole.name || 'Администратор'
+  adminRole.permissions = [{ system: '*', view: true, create: true, edit: true, delete: true, transition: true }]
+
+  let adminUser = db.users.find((user) => user.id === 'usr_admin' || user.login === 'admin')
+  if (!adminUser) {
+    adminUser = {
+      id: 'usr_admin',
+      login: 'admin',
+      password: 'admin',
+      lastName: 'Администратор',
+      firstName: 'Системы',
+      organizationId: 'org_system',
+      roleIds: ['role_admin'],
+      status: 'active',
+    }
+    db.users.unshift(adminUser)
+  }
+  adminUser.id = 'usr_admin'
+  adminUser.login = adminUser.login || 'admin'
+  adminUser.password = adminUser.password || 'admin'
+  adminUser.organizationId = db.organizations.some((organization) => organization.id === adminUser.organizationId)
+    ? adminUser.organizationId
+    : 'org_system'
+  adminUser.roleIds = Array.from(new Set([...adminUser.roleIds, 'role_admin']))
+  adminUser.status = 'active'
 }
 
 function delay(): Promise<void> {
@@ -622,12 +841,19 @@ function normalizeEntitySchema(
     const newCode = uniqueSystemCode(field.name, usedFieldCodes, 'field')
     usedFieldCodes.add(newCode)
     if (oldCode && oldCode !== newCode) fieldCodeChanges.push({ oldCode, newCode })
-    return { ...field, code: newCode, order: index + 1 }
+    return { ...field, code: newCode, searchable: true, filterable: true, order: index + 1 }
   })
+  const mapSettings = normalizeMapSettings(
+    (schema as EntitySchema & { mapSettings?: EntityMapSettings }).mapSettings,
+    schema.geometryType,
+  )
+  const geometryType = primaryGeometryType(mapSettings, schema.geometryType)
 
   return {
     schema: {
       ...schema,
+      geometryType,
+      mapSettings,
       code: uniqueSystemCode(
         schema.name,
         db.entitySchemas.filter((candidate) => candidate.id !== schema.id).map((candidate) => candidate.code),
@@ -644,8 +870,122 @@ function normalizeFields(fields: EntitySchema['fields']): EntitySchema['fields']
   return fields.map((field, index) => {
     const code = uniqueSystemCode(field.name, usedCodes, 'field')
     usedCodes.add(code)
-    return { ...field, code, order: index + 1 }
+    return { ...field, code, searchable: true, filterable: true, order: index + 1 }
   })
+}
+
+function normalizeEntityMapSettings(schema: EntitySchema): EntitySchema {
+  const mapSettings = normalizeMapSettings(
+    (schema as EntitySchema & { mapSettings?: EntityMapSettings }).mapSettings,
+    schema.geometryType,
+  )
+  return {
+    ...schema,
+    geometryType: primaryGeometryType(mapSettings, schema.geometryType),
+    mapSettings,
+    fields: normalizeFields(schema.fields),
+  }
+}
+
+function defaultAddressField(): EntitySchema['fields'][number] {
+  return {
+    id: createId('fld'),
+    code: 'address',
+    name: 'Адрес',
+    type: 'address',
+    required: false,
+    listVisible: true,
+    cardVisible: true,
+    searchable: true,
+    filterable: true,
+    order: 1,
+  }
+}
+
+function defaultMapSettings(): EntityMapSettings {
+  return {
+    enabledGeometryTypes: ['point'],
+    clusteringEnabled: false,
+    styles: defaultGeometryStyles(),
+    colorRules: [],
+  }
+}
+
+function normalizeMapSettings(settings: EntityMapSettings | undefined, geometryType: GeometryType): EntityMapSettings {
+  const stored = settings as StoredMapSettings | undefined
+  const fallback = defaultMapSettings()
+  const enabledGeometryTypes = (stored?.enabledGeometryTypes ?? geometryTypeToEnabledList(geometryType))
+    .filter((type): type is EntityMapSettings['enabledGeometryTypes'][number] =>
+      type === 'point' || type === 'lineString' || type === 'polygon',
+    )
+
+  return {
+    enabledGeometryTypes: enabledGeometryTypes.length > 0 ? enabledGeometryTypes : fallback.enabledGeometryTypes,
+    clusteringEnabled: Boolean(stored?.clusteringEnabled),
+    styles: {
+      point: normalizeMapStyle(stored?.styles?.point ?? stored?.style, fallback.styles.point),
+      lineString: normalizeMapStyle(stored?.styles?.lineString ?? stored?.style, fallback.styles.lineString),
+      polygon: normalizeMapStyle(stored?.styles?.polygon ?? stored?.style, fallback.styles.polygon),
+    },
+    colorRules: (stored?.colorRules ?? []).map((rule) => ({
+      id: rule.id || createId('maprule'),
+      name: rule.name || 'Условие цвета',
+      fieldCode: rule.fieldCode || '__status',
+      operator: rule.operator || 'equals',
+      value: String(rule.value ?? ''),
+      color: rule.color || '#ef4444',
+    })),
+  }
+}
+
+function defaultGeometryStyles(): Record<EntityMapSettings['enabledGeometryTypes'][number], EntityMapStyle> {
+  return {
+    point: {
+      fill: '#f97316',
+      stroke: '#c2410c',
+      strokeWidth: 2,
+      pointSize: 8,
+      opacity: 0.82,
+    },
+    lineString: {
+      fill: '#38bdf8',
+      stroke: '#0284c7',
+      strokeWidth: 3,
+      pointSize: 8,
+      opacity: 0.9,
+    },
+    polygon: {
+      fill: '#2563eb',
+      stroke: '#1d4ed8',
+      strokeWidth: 2,
+      pointSize: 8,
+      opacity: 0.74,
+    },
+  }
+}
+
+function normalizeMapStyle(style: Partial<EntityMapStyle> | undefined, fallback: EntityMapStyle): EntityMapStyle {
+  return {
+    fill: style?.fill || fallback.fill,
+    stroke: style?.stroke || fallback.stroke,
+    strokeWidth: Math.max(1, Number(style?.strokeWidth ?? fallback.strokeWidth)),
+    pointSize: Math.max(4, Number(style?.pointSize ?? fallback.pointSize)),
+    opacity: Math.min(1, Math.max(0.1, Number(style?.opacity ?? fallback.opacity))),
+  }
+}
+
+function primaryMapStyle(schema: EntitySchema): EntityMapStyle {
+  const geometryType = schema.geometryType === 'none' ? schema.mapSettings.enabledGeometryTypes[0] : schema.geometryType
+  return schema.mapSettings.styles[geometryType] ?? schema.mapSettings.styles.point
+}
+
+function geometryTypeToEnabledList(geometryType: GeometryType): EntityMapSettings['enabledGeometryTypes'] {
+  return geometryType === 'none' ? ['point'] : [geometryType]
+}
+
+function primaryGeometryType(settings: EntityMapSettings, current: GeometryType): GeometryType {
+  if (current !== 'none' && settings.enabledGeometryTypes.includes(current)) return current
+  return settings.enabledGeometryTypes[0] ?? 'none'
 }
 
 function migrateEntityObjectFieldCodes(
@@ -761,60 +1101,8 @@ function defaultUserSettings(userId: string): UserSettings {
   return {
     userId,
     home: {
-      summaryBlocks: [
-        summaryBlock(userId, 'orders_count', 'ent_orders', '', 'count', 'Всего ордеров', 220, 1),
-        summaryBlock(userId, 'orders_created_today', 'ent_orders', '', 'count', 'Ордера, заведённые сегодня', 280, 2, [
-          filter(userId, 'orders_created_today', '__createdAt', 'today', ''),
-        ]),
-        summaryBlock(userId, 'orders_active_future', 'ent_orders', '', 'count', 'Ордера в работе', 460, 3, [
-          filter(userId, 'orders_active', '__status', 'equals', 'active'),
-          filter(userId, 'orders_end_future', 'endDate', 'afterToday', ''),
-        ]),
-        summaryBlock(userId, 'orders_contractors', 'ent_orders', 'contractor', 'unique', 'Подрядчики', 220, 4),
-        summaryBlock(userId, 'warranty_count', 'ent_warranty', '', 'count', 'Гарантийные участки', 260, 5),
-        summaryBlock(userId, 'playgrounds_year', 'ent_playgrounds', 'installationYear', 'average', 'Средний год установки', 460, 6),
-      ],
+      summaryBlocks: [],
     },
-  }
-}
-
-function summaryBlock(
-  userId: string,
-  idSuffix: string,
-  entityId: string,
-  fieldCode: string,
-  metric: DashboardSummaryBlock['metric'],
-  title: string,
-  widthPx: number,
-  order: number,
-  filters: DashboardFilter[] = [],
-): DashboardSummaryBlock {
-  return {
-    id: `sum_${userId}_${idSuffix}`,
-    entityId,
-    fieldCode,
-    metric,
-    title,
-    showInfo: false,
-    description: '',
-    widthPx,
-    order,
-    filters,
-  }
-}
-
-function filter(
-  userId: string,
-  idSuffix: string,
-  fieldCode: string,
-  operator: DashboardFilter['operator'],
-  value: string,
-): DashboardFilter {
-  return {
-    id: `flt_${userId}_${idSuffix}`,
-    fieldCode,
-    operator,
-    value,
   }
 }
 
@@ -904,13 +1192,7 @@ function grantDefaultPermissions(db: AppDatabase, entityId: string): void {
 
 function ensureLayer(db: AppDatabase, schema: EntitySchema): void {
   if (schema.geometryType === 'none' || db.layers.some((layer) => layer.entityId === schema.id)) return
-  const palette = [
-    ['#2563eb', '#1d4ed8'],
-    ['#10b981', '#047857'],
-    ['#f97316', '#c2410c'],
-    ['#7c3aed', '#5b21b6'],
-  ]
-  const [fill, stroke] = palette[db.layers.length % palette.length]
+  const style = primaryMapStyle(schema)
   db.layers.push({
     id: createId('layer'),
     name: schema.name,
@@ -919,8 +1201,32 @@ function ensureLayer(db: AppDatabase, schema: EntitySchema): void {
     geometryType: schema.geometryType,
     visibleByDefault: true,
     selectable: true,
-    opacity: 0.72,
-    style: { fill, stroke, strokeWidth: 2, pointSize: 8 },
+    opacity: style.opacity,
+    style: {
+      fill: style.fill,
+      stroke: style.stroke,
+      strokeWidth: style.strokeWidth,
+      pointSize: style.pointSize,
+    },
+  })
+}
+
+function syncLayerWithMapSettings(db: AppDatabase, schema: EntitySchema): void {
+  const style = primaryMapStyle(schema)
+  db.layers = db.layers.map((layer) => {
+    if (layer.entityId !== schema.id) return layer
+    return {
+      ...layer,
+      name: schema.name,
+      geometryType: schema.geometryType,
+      opacity: style.opacity,
+      style: {
+        fill: style.fill,
+        stroke: style.stroke,
+        strokeWidth: style.strokeWidth,
+        pointSize: style.pointSize,
+      },
+    }
   })
 }
 

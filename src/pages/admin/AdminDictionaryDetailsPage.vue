@@ -170,7 +170,7 @@ async function importSelectedColumn() {
           <div class="inline-actions">
             <UiInput v-model="search" placeholder="Поиск по значениям" />
             <UiButton label="Добавить" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addItem" />
-            <UiButton label="Загрузить из Excel" icon="pi pi-upload" severity="secondary" variant="outlined" @click="fileInput?.click()" />
+            <UiButton label="Загрузить из таблицы" icon="pi pi-upload" severity="secondary" variant="outlined" @click="fileInput?.click()" />
             <input
               ref="fileInput"
               class="dictionary-file-input"
@@ -184,7 +184,7 @@ async function importSelectedColumn() {
         <UiEmptyState
           v-if="editable.items.length === 0"
           title="Значений пока нет"
-          description="Добавьте значение вручную или загрузите файл Excel."
+          description="Добавьте значение вручную или загрузите табличный файл."
         />
         <UiEmptyState
           v-else-if="filteredItems.length === 0"
@@ -196,7 +196,7 @@ async function importSelectedColumn() {
           <thead>
             <tr>
               <th>Название</th>
-              <th>Active</th>
+              <th>Активен</th>
               <th></th>
             </tr>
           </thead>
@@ -216,7 +216,7 @@ async function importSelectedColumn() {
         </table>
       </section>
 
-      <UiDialog v-model:visible="importDialogVisible" header="Выберите колонку Excel" width="460px">
+      <UiDialog v-model:visible="importDialogVisible" header="Выберите колонку файла" width="460px">
         <div class="stack">
           <div class="form-field">
             <label>Колонка со значениями</label>

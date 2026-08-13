@@ -3,12 +3,12 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   ArrowLeft,
+  Braces,
   Building2,
   Database,
   FileInput,
   GitBranch,
   Home,
-  Layers,
   ListChecks,
   Map,
   MapPinned,
@@ -38,11 +38,11 @@ const runtimeUtilityItems = [
 const adminItems = [
   { label: 'Сущности', to: '/admin/entities', icon: Database },
   { label: 'Справочники', to: '/admin/dictionaries', icon: ListChecks },
-  { label: 'Слои', to: '/admin/layers', icon: Layers },
   { label: 'Пользователи', to: '/admin/users', icon: Users },
   { label: 'Роли', to: '/admin/roles', icon: Shield },
   { label: 'Организации', to: '/admin/organizations', icon: Building2 },
   { label: 'Импорт', to: '/admin/import', icon: FileInput },
+  { label: 'API', to: '/admin/api', icon: Braces },
   { label: 'Платформа', to: '/admin/settings', icon: Settings },
 ]
 
@@ -76,7 +76,7 @@ const runtimeEntityItems = computed(() =>
       <span v-if="!collapsed">Скрыть</span>
     </button>
 
-    <nav v-if="mode === 'runtime'" class="sidebar__nav sidebar__nav--runtime" aria-label="Runtime навигация">
+    <nav v-if="mode === 'runtime'" class="sidebar__nav sidebar__nav--runtime" aria-label="Навигация приложения">
       <div class="sidebar__section sidebar__section--utility">
         <RouterLink
           v-for="item in runtimeUtilityItems"
@@ -90,6 +90,7 @@ const runtimeEntityItems = computed(() =>
       </div>
 
       <div class="sidebar__section sidebar__section--entities">
+        <p v-if="runtimeEntityItems.length === 0 && !collapsed" class="sidebar__empty">Сущностей нет</p>
         <RouterLink
           v-for="item in runtimeEntityItems"
           :key="item.to"

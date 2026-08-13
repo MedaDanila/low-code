@@ -23,16 +23,16 @@ const rows = computed<Record<string, unknown>[]>(() =>
 
 <template>
   <div>
-    <UiPageHeader title="Процессы" description="Workflow схемы сущностей." />
+    <UiPageHeader title="Процессы" description="Схемы процессов сущностей." />
     <div class="panel">
       <UiTable
         :rows="rows"
         :columns="[
           { field: 'name', header: 'Название' },
-          { field: 'entity', header: 'Entity' },
-          { field: 'states', header: 'States' },
-          { field: 'transitions', header: 'Transitions' },
-          { field: 'status', header: 'Status' },
+          { field: 'entity', header: 'Сущность' },
+          { field: 'states', header: 'Состояния' },
+          { field: 'transitions', header: 'Переходы' },
+          { field: 'status', header: 'Статус' },
         ]"
         @row-click="router.push(`/admin/workflows/${$event.id}`)"
       >

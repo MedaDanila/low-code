@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Info } from '@lucide/vue'
 import { useToast } from 'primevue/usetoast'
+import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiInput from '../../shared/ui/UiInput.vue'
@@ -47,6 +48,7 @@ const SYSTEM_FILTER_FIELDS = [
 ]
 
 const toast = useToast()
+const router = useRouter()
 const auth = useAuthStore()
 const platform = usePlatformStore()
 const permissions = usePermissions()
@@ -646,12 +648,19 @@ async function save(): Promise<void> {
 <template>
   <div>
     <UiPageHeader
-      eyebrow="Runtime"
+      eyebrow="Приложение"
       title="Главная"
       :description="platform.settings?.municipalityName ?? 'Нижний Новгород'"
     >
       <template #actions>
-        <UiButton label="Добавить блок" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addBlock" />
+        <UiButton
+          label="Добавить блок"
+          icon="pi pi-plus"
+          severity="secondary"
+          variant="outlined"
+          :disabled="availableSchemas.length === 0"
+          @click="addBlock"
+        />
         <UiButton label="Сохранить" icon="pi pi-save" :loading="saving" @click="save" />
       </template>
     </UiPageHeader>
@@ -659,7 +668,15 @@ async function save(): Promise<void> {
     <div class="home-settings-layout">
       <section class="home-preview-surface">
         <UiEmptyState
-          v-if="previewGroups.length === 0"
+          v-if="availableSchemas.length === 0"
+          title="Нет сущностей для саммари"
+          description="Сначала создайте и опубликуйте сущность, затем настройте блоки главного экрана."
+        >
+          <UiButton label="Создать сущность" icon="pi pi-plus" @click="router.push('/admin/entities/new')" />
+        </UiEmptyState>
+
+        <UiEmptyState
+          v-else-if="previewGroups.length === 0"
           title="Саммари не настроены"
           description="Создайте первый блок для главного экрана."
         >

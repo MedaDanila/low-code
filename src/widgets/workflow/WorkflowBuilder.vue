@@ -71,8 +71,8 @@ function updateRoles(roleId: string, checked: boolean) {
 <template>
   <div class="workflow-builder">
     <div class="workflow-builder__toolbar">
-      <UiButton label="State" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addState" />
-      <UiButton label="Transition" icon="pi pi-arrow-right" severity="secondary" variant="outlined" @click="addTransition" />
+      <UiButton label="Состояние" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addState" />
+      <UiButton label="Переход" icon="pi pi-arrow-right" severity="secondary" variant="outlined" @click="addTransition" />
     </div>
     <div class="workflow-builder__body">
       <div class="workflow-canvas">
@@ -111,30 +111,30 @@ function updateRoles(roleId: string, checked: boolean) {
       </div>
       <aside class="panel stack">
         <template v-if="selectedState">
-          <h3 class="surface-title">State</h3>
+          <h3 class="surface-title">Состояние</h3>
           <div class="form-field">
             <label>Название</label>
             <UiInput v-model="selectedState.name" />
           </div>
-          <label><Checkbox v-model="selectedState.initial" binary /> Initial</label>
-          <label><Checkbox v-model="selectedState.final" binary /> Final</label>
+          <label><Checkbox v-model="selectedState.initial" binary /> Начальное</label>
+          <label><Checkbox v-model="selectedState.final" binary /> Финальное</label>
         </template>
         <template v-else-if="selectedTransition">
-          <h3 class="surface-title">Transition</h3>
+          <h3 class="surface-title">Переход</h3>
           <div class="form-field">
             <label>Название действия</label>
             <UiInput v-model="selectedTransition.name" />
           </div>
           <div class="form-field">
-            <label>From</label>
+            <label>Из состояния</label>
             <UiSelect v-model="selectedTransition.fromStateId" :options="stateOptions" />
           </div>
           <div class="form-field">
-            <label>To</label>
+            <label>В состояние</label>
             <UiSelect v-model="selectedTransition.toStateId" :options="stateOptions" />
           </div>
           <div class="stack">
-            <span class="muted">Allowed roles</span>
+            <span class="muted">Разрешённые роли</span>
             <label v-for="role in roleOptions" :key="role.value">
               <Checkbox
                 :model-value="selectedTransition.allowedRoleIds.includes(String(role.value))"
@@ -145,7 +145,7 @@ function updateRoles(roleId: string, checked: boolean) {
             </label>
           </div>
           <label><Checkbox v-model="selectedTransition.validateRequiredFields" binary /> Проверять обязательные поля</label>
-          <label><Checkbox v-model="selectedTransition.validateGeoRules" binary /> Проверять Geo Rules</label>
+          <label><Checkbox v-model="selectedTransition.validateGeoRules" binary /> Проверять гео-правила</label>
         </template>
       </aside>
     </div>

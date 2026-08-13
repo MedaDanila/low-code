@@ -26,13 +26,13 @@ watch(
 async function save() {
   if (!workflow.value) return
   await platform.saveWorkflow(workflow.value)
-  toast.add({ severity: 'success', summary: 'Workflow сохранён', life: 2400 })
+  toast.add({ severity: 'success', summary: 'Процесс сохранён', life: 2400 })
 }
 </script>
 
 <template>
   <div>
-    <UiEmptyState v-if="!workflow" title="Workflow не найден" />
+    <UiEmptyState v-if="!workflow" title="Процесс не найден" />
     <template v-else>
       <UiPageHeader :title="workflow.name" :description="platform.schemaById(workflow.entityId)?.name">
         <template #actions>

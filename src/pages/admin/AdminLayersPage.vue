@@ -31,13 +31,18 @@ const rows = computed<Record<string, unknown>[]>(() =>
     id: layer.id,
     name: layer.name,
     source: platform.schemaById(layer.entityId)?.name ?? layer.entityId,
-    geometry: layer.geometryType,
+    geometry: geometryLabels[layer.geometryType] ?? layer.geometryType,
     visible: layer.visibleByDefault,
     selectable: layer.selectable,
   })),
 )
 
 const entityOptions = computed(() => platform.activeSchemas.map((schema) => ({ label: schema.name, value: schema.id })))
+const geometryLabels: Record<string, string> = {
+  point: 'Точка',
+  lineString: 'Линия',
+  polygon: 'Полигон',
+}
 
 function select(row: Record<string, unknown>) {
   selectedId.value = String(row.id)
@@ -54,17 +59,17 @@ async function save() {
 
 <template>
   <div>
-    <UiPageHeader title="Слои" description="Настройки отображения entity-backed GIS layers." />
+    <UiPageHeader title="Слои" description="Настройки отображения слоёв карты для сущностей." />
     <section class="split-layout">
       <div class="panel">
         <UiTable
           :rows="rows"
           :columns="[
             { field: 'name', header: 'Название' },
-            { field: 'source', header: 'Source' },
-            { field: 'geometry', header: 'Geometry' },
-            { field: 'visible', header: 'Visible by default' },
-            { field: 'selectable', header: 'Selectable' },
+            { field: 'source', header: 'Источник' },
+            { field: 'geometry', header: 'Геометрия' },
+            { field: 'visible', header: 'Видим по умолчанию' },
+            { field: 'selectable', header: 'Выбираемый' },
           ]"
           @row-click="select"
         />
@@ -75,30 +80,30 @@ async function save() {
           <UiInput v-model="editable.name" />
         </div>
         <div class="form-field">
-          <label>Entity source</label>
+          <label>Сущность-источник</label>
           <UiSelect v-model="editable.entityId" :options="entityOptions" />
         </div>
-        <label><Checkbox v-model="editable.visibleByDefault" binary /> Default visibility</label>
-        <label><Checkbox v-model="editable.selectable" binary /> Selectable</label>
+        <label><Checkbox v-model="editable.visibleByDefault" binary /> Видим по умолчанию</label>
+        <label><Checkbox v-model="editable.selectable" binary /> Доступен для выбора</label>
         <div class="form-field">
-          <label>Opacity: {{ Math.round(editable.opacity * 100) }}%</label>
+          <label>Прозрачность: {{ Math.round(editable.opacity * 100) }}%</label>
           <Slider :model-value="Math.round(editable.opacity * 100)" @update:model-value="editable.opacity = Number($event) / 100" />
         </div>
         <div class="form-grid">
           <div class="form-field">
-            <label>Fill</label>
+            <label>Заливка</label>
             <input v-model="editable.style.fill" type="color" />
           </div>
           <div class="form-field">
-            <label>Stroke</label>
+            <label>Обводка</label>
             <input v-model="editable.style.stroke" type="color" />
           </div>
           <div class="form-field">
-            <label>Stroke width</label>
+            <label>Толщина линии</label>
             <input v-model.number="editable.style.strokeWidth" type="number" min="1" />
           </div>
           <div class="form-field">
-            <label>Point size</label>
+            <label>Размер точки</label>
             <input v-model.number="editable.style.pointSize" type="number" min="4" />
           </div>
         </div>

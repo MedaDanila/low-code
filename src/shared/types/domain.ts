@@ -8,9 +8,37 @@ export type FieldType =
   | 'boolean'
   | 'date'
   | 'datetime'
+  | 'address'
   | 'enum'
   | 'reference'
   | 'file'
+
+export type MapGeometryType = Exclude<GeometryType, 'none'>
+export type EntityMapRuleOperator = 'equals' | 'notEquals' | 'contains' | 'filled' | 'empty' | 'before' | 'after'
+
+export interface EntityMapStyle {
+  fill: string
+  stroke: string
+  strokeWidth: number
+  pointSize: number
+  opacity: number
+}
+
+export interface EntityMapColorRule {
+  id: string
+  name: string
+  fieldCode: string
+  operator: EntityMapRuleOperator
+  value: string
+  color: string
+}
+
+export interface EntityMapSettings {
+  enabledGeometryTypes: MapGeometryType[]
+  clusteringEnabled: boolean
+  styles: Record<MapGeometryType, EntityMapStyle>
+  colorRules: EntityMapColorRule[]
+}
 
 export type ObjectValue = string | number | boolean | string[] | null
 export type EntityObjectValues = Record<string, ObjectValue>
@@ -21,6 +49,7 @@ export interface EntitySchema {
   name: string
   description?: string
   geometryType: GeometryType
+  mapSettings: EntityMapSettings
   fields: EntityField[]
   status: EntityStatus
   createdAt: string

@@ -42,11 +42,11 @@ const severityOptions = [
         <UiInput v-model="rule.name" />
       </div>
       <div class="form-field">
-        <label>Entity</label>
+        <label>Сущность</label>
         <UiSelect v-model="rule.entityId" :options="entityOptions" />
       </div>
       <div class="form-field">
-        <label>Severity</label>
+        <label>Важность</label>
         <UiSelect v-model="rule.severity" :options="severityOptions" />
       </div>
       <div class="form-field full">
@@ -56,7 +56,7 @@ const severityOptions = [
     </div>
     <label class="blocker">
       <Checkbox v-model="rule.blockWorkflowTransition" binary />
-      Блокировать переход workflow
+      Блокировать переход процесса
     </label>
   </div>
 </template>

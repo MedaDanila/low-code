@@ -24,8 +24,8 @@ async function submit() {
   <main class="login-page">
     <section class="login-card">
       <div>
-        <span class="brand-mark">GIS</span>
-        <p class="eyebrow">Low-code municipal workspace</p>
+        <span class="brand-mark">ГИС</span>
+        <p class="eyebrow">Муниципальная платформа без кода</p>
         <h1>Вход в платформу</h1>
       </div>
       <form class="stack" @submit.prevent="submit">
@@ -48,7 +48,7 @@ async function submit() {
         <UiButton label="Войти" type="submit" icon="pi pi-sign-in" :loading="auth.loading" />
       </form>
       <div class="demo-accounts">
-        <span>Demo accounts</span>
+        <span>Демо-аккаунты</span>
         <code>admin/admin</code>
         <code>operator/operator</code>
         <code>manager/manager</code>

@@ -18,7 +18,7 @@ const objects = computed(() => (schema.value ? platform.objectsByEntity(schema.v
     <UiPageHeader
       v-if="schema"
       :title="schema.name"
-      :description="schema.description ?? 'Автоматически созданный реестр на основе EntitySchema.'"
+      :description="schema.description ?? 'Автоматически созданный реестр на основе схемы сущности.'"
     />
     <UiEmptyState v-if="!schema" title="Сущность не найдена" description="Проверьте публикацию и системный код сущности." />
     <EntityRegistry v-else :schema="schema" :objects="objects" :loading="platform.loading" />

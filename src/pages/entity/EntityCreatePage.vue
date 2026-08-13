@@ -63,7 +63,7 @@ async function validate(payload: EntityFormPayload) {
 
 <template>
   <div>
-    <UiPageHeader v-if="schema" :title="`Создать: ${schema.name}`" description="Форма построена из metadata сущности." />
+    <UiPageHeader v-if="schema" :title="`Создать: ${schema.name}`" description="Форма построена по метаданным сущности." />
     <UiEmptyState v-if="!schema" title="Сущность не найдена" />
     <div v-else class="panel">
       <EntityForm
@@ -75,7 +75,7 @@ async function validate(payload: EntityFormPayload) {
         @validate="validate"
       />
     </div>
-    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Geo validation">
+    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Проверка геометрии">
       <GeoValidationResult
         :result="validationResult"
         @close="validationVisible = false"

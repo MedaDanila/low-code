@@ -14,17 +14,35 @@ export interface ImportedSpreadsheetColumn {
   values: string[]
 }
 
+export interface ImportedSpreadsheetRow {
+  rowNumber: number
+  values: string[]
+}
+
+export interface ImportedSpreadsheetTable {
+  columns: ImportedSpreadsheetColumn[]
+  rows: ImportedSpreadsheetRow[]
+}
+
 export async function readDictionaryItemsFile(file: File): Promise<ImportedDictionaryItem[]> {
   const [column] = await readSpreadsheetColumnsFile(file)
   return columnValuesToItems(column?.values ?? [])
 }
 
 export async function readSpreadsheetColumnsFile(file: File): Promise<ImportedSpreadsheetColumn[]> {
+  return rowsToColumns(await readSpreadsheetRows(file))
+}
+
+export async function readSpreadsheetTableFile(file: File): Promise<ImportedSpreadsheetTable> {
+  return rowsToTable(await readSpreadsheetRows(file))
+}
+
+async function readSpreadsheetRows(file: File): Promise<string[][]> {
   const extension = file.name.split('.').pop()?.toLowerCase()
-  if (extension === 'xlsx') return rowsToColumns(await parseXlsxRows(await file.arrayBuffer()))
-  if (extension === 'csv' || extension === 'tsv' || extension === 'txt') return rowsToColumns(parseDelimitedRows(await file.text()))
+  if (extension === 'xlsx') return parseXlsxRows(await file.arrayBuffer())
+  if (extension === 'csv' || extension === 'tsv' || extension === 'txt') return parseDelimitedRows(await file.text())
   if (extension === 'xls') {
-    throw new Error('Формат .xls не поддерживается в браузерном MVP. Сохраните файл как .xlsx или CSV.')
+    throw new Error('Формат .xls не поддерживается в браузере. Сохраните файл в формате .xlsx или .csv.')
   }
   throw new Error('Поддерживаются файлы .xlsx, .csv и .tsv.')
 }
@@ -63,7 +81,7 @@ function splitDelimitedLine(line: string, delimiter: string): string[] {
 async function parseXlsxRows(buffer: ArrayBuffer): Promise<string[][]> {
   const files = await unzipXlsx(buffer)
   const sheet = files.get('xl/worksheets/sheet1.xml') ?? firstWorksheet(files)
-  if (!sheet) throw new Error('В Excel-файле не найден первый лист.')
+  if (!sheet) throw new Error('В файле .xlsx не найден первый лист.')
 
   const sharedStrings = parseSharedStrings(files.get('xl/sharedStrings.xml'))
   const sheetDoc = parseXml(sheet)
@@ -119,14 +137,14 @@ function findEndOfCentralDirectory(view: DataView): number {
   for (let offset = view.byteLength - 22; offset >= 0; offset -= 1) {
     if (view.getUint32(offset, true) === 0x06054b50) return offset
   }
-  throw new Error('Excel-файл повреждён: не найден central directory.')
+  throw new Error('Файл .xlsx повреждён: не найден центральный каталог.')
 }
 
 async function inflateZipEntry(bytes: Uint8Array, method: number): Promise<ArrayBuffer> {
   if (method === 0) return toArrayBuffer(bytes)
-  if (method !== 8) throw new Error('Excel-файл использует неподдерживаемое сжатие.')
+  if (method !== 8) throw new Error('Файл .xlsx использует неподдерживаемое сжатие.')
   if (!('DecompressionStream' in window)) {
-    throw new Error('Ваш браузер не поддерживает распаковку .xlsx. Используйте CSV.')
+    throw new Error('Ваш браузер не поддерживает распаковку .xlsx. Используйте .csv.')
   }
   const stream = new Blob([toArrayBuffer(bytes)]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
   return new Response(stream).arrayBuffer()
@@ -161,14 +179,14 @@ function readCellValue(cell: Element, sharedStrings: string[]): string {
   }
   const value = cell.getElementsByTagName('v')[0]?.textContent?.trim() ?? ''
   if (type === 's') return sharedStrings[Number(value)] ?? ''
-  if (type === 'b') return value === '1' ? 'true' : 'false'
+  if (type === 'b') return value === '1' ? 'Да' : 'Нет'
   return value
 }
 
 function parseXml(xml: string): Document {
   const document = new DOMParser().parseFromString(xml, 'application/xml')
   if (document.getElementsByTagName('parsererror').length > 0) {
-    throw new Error('Не удалось прочитать XML внутри Excel-файла.')
+    throw new Error('Не удалось прочитать внутреннюю разметку файла .xlsx.')
   }
   return document
 }
@@ -190,6 +208,31 @@ function rowsToColumns(rows: string[][]): ImportedSpreadsheetColumn[] {
       values,
     }
   }).filter((column) => column.values.length > 0)
+}
+
+function rowsToTable(rows: string[][]): ImportedSpreadsheetTable {
+  const normalizedRows = rows
+    .map((values, index) => ({ rowNumber: index + 1, values }))
+    .filter((row) => row.values.some((cell) => cell.trim()))
+  const headerRow = normalizedRows[0]
+  const dataRows = normalizedRows.slice(1)
+  const maxColumns = Math.max(...normalizedRows.map((row) => row.values.length), 0)
+  const columns = Array.from({ length: maxColumns }, (_, index) => {
+    const columnName = indexToColumnName(index)
+    const header = headerRow?.values[index]?.trim()
+    return {
+      index,
+      label: header ? `${columnName} — ${header}` : `Колонка ${columnName}`,
+      values: dataRows.map((row) => row.values[index]?.trim() ?? '').filter(Boolean),
+    }
+  }).filter((column) => column.values.length > 0 || headerRow?.values[column.index]?.trim())
+  return {
+    columns,
+    rows: dataRows.map((row) => ({
+      rowNumber: row.rowNumber,
+      values: Array.from({ length: maxColumns }, (_, index) => row.values[index]?.trim() ?? ''),
+    })),
+  }
 }
 
 function isColumnHeader(value?: string): boolean {

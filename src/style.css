@@ -62,7 +62,7 @@ a {
   min-height: 100vh;
 }
 
-p-license-host {
+#p-license-host {
   display: none !important;
 }
 
@@ -220,6 +220,14 @@ p-license-host {
   color: var(--color-sidebar-muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.sidebar__empty {
+  margin: 0;
+  padding: 10px;
+  color: var(--color-sidebar-muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .sidebar__bottom {

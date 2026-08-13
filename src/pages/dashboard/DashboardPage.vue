@@ -50,6 +50,9 @@ const configuredBlocks = computed(() =>
     .sort((first, second) => first.order - second.order)
     .filter((block) => Boolean(platform.schemaById(block.entityId))),
 )
+const visibleRuntimeSchemas = computed(() =>
+  platform.runtimeSchemas.filter((schema) => permissions.can('view', schema.id)),
+)
 
 const summaryGroups = computed<SummaryGroup[]>(() => {
   const groups = new Map<string, SummaryGroup>()
@@ -351,13 +354,21 @@ function localDateKey(date: Date): string {
 <template>
   <div>
     <UiPageHeader
-      eyebrow="Runtime"
+      eyebrow="Приложение"
       title="Главная"
       :description="platform.settings?.municipalityName ?? 'Нижний Новгород'"
     />
 
     <UiEmptyState
-      v-if="summaryGroups.length === 0"
+      v-if="visibleRuntimeSchemas.length === 0"
+      title="Данных пока нет"
+      description="Создайте и опубликуйте первую сущность, затем добавьте объекты или импортируйте данные."
+    >
+      <UiButton label="Создать сущность" icon="pi pi-plus" @click="router.push('/admin/entities/new')" />
+    </UiEmptyState>
+
+    <UiEmptyState
+      v-else-if="summaryGroups.length === 0"
       title="Саммари не настроены"
       description="Добавьте блоки для главного экрана в настройках."
     >

@@ -28,7 +28,7 @@ async function save() {
 
 async function resetDemo() {
   await platform.resetDemoData()
-  toast.add({ severity: 'info', summary: 'Demo data восстановлены', life: 2200 })
+  toast.add({ severity: 'info', summary: 'Данные очищены', life: 2200 })
 }
 </script>
 
@@ -36,16 +36,16 @@ async function resetDemo() {
   <div>
     <UiPageHeader title="Платформа" description="Системная конфигурация платформы и карты." />
     <form v-if="editable" class="panel form-grid" @submit.prevent="save">
-      <div class="form-field"><label>Platform name</label><UiInput v-model="editable.platformName" /></div>
-      <div class="form-field"><label>Municipality name</label><UiInput v-model="editable.municipalityName" /></div>
-      <div class="form-field"><label>Map center longitude</label><InputNumber v-model="editable.mapCenter[0]" :min-fraction-digits="4" fluid /></div>
-      <div class="form-field"><label>Map center latitude</label><InputNumber v-model="editable.mapCenter[1]" :min-fraction-digits="4" fluid /></div>
-      <div class="form-field"><label>Map zoom</label><InputNumber v-model="editable.mapZoom" fluid /></div>
-      <div class="form-field"><label>Session timeout</label><InputNumber v-model="editable.sessionTimeoutMinutes" suffix=" мин" fluid /></div>
-      <div class="form-field"><label>Date/time format</label><UiInput v-model="editable.dateTimeFormat" /></div>
+      <div class="form-field"><label>Название платформы</label><UiInput v-model="editable.platformName" /></div>
+      <div class="form-field"><label>Муниципалитет</label><UiInput v-model="editable.municipalityName" /></div>
+      <div class="form-field"><label>Долгота центра карты</label><InputNumber v-model="editable.mapCenter[0]" :min-fraction-digits="4" fluid /></div>
+      <div class="form-field"><label>Широта центра карты</label><InputNumber v-model="editable.mapCenter[1]" :min-fraction-digits="4" fluid /></div>
+      <div class="form-field"><label>Масштаб карты</label><InputNumber v-model="editable.mapZoom" fluid /></div>
+      <div class="form-field"><label>Тайм-аут сессии</label><InputNumber v-model="editable.sessionTimeoutMinutes" suffix=" мин" fluid /></div>
+      <div class="form-field"><label>Формат даты и времени</label><UiInput v-model="editable.dateTimeFormat" /></div>
       <div class="form-field full inline-actions">
         <UiButton label="Сохранить" type="submit" icon="pi pi-save" />
-        <UiButton label="Reset demo data" severity="secondary" variant="outlined" @click="resetDemo" />
+        <UiButton label="Очистить данные" severity="secondary" variant="outlined" @click="resetDemo" />
       </div>
     </form>
   </div>

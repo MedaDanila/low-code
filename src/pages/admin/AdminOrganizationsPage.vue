@@ -75,7 +75,7 @@ async function save() {
       </div>
       <aside v-if="editable" class="panel stack">
         <div class="form-field"><label>Название</label><UiInput v-model="editable.name" /></div>
-        <div class="form-field"><label>Parent</label><UiSelect v-model="editable.parentId" :options="parentOptions" /></div>
+        <div class="form-field"><label>Родительская организация</label><UiSelect v-model="editable.parentId" :options="parentOptions" /></div>
         <UiButton label="Сохранить" icon="pi pi-save" @click="save" />
       </aside>
     </section>

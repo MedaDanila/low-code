@@ -75,12 +75,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresSystemPermission: true },
       },
       {
-        path: 'layers',
-        name: 'admin-layers',
-        component: () => import('../../pages/admin/AdminLayersPage.vue'),
-        meta: { requiresSystemPermission: true },
-      },
-      {
         path: 'users',
         name: 'admin-users',
         component: () => import('../../pages/admin/AdminUsersPage.vue'),
@@ -114,6 +108,12 @@ const routes: RouteRecordRaw[] = [
         path: 'import',
         name: 'admin-import',
         component: () => import('../../pages/admin/AdminImportPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'api',
+        name: 'admin-api',
+        component: () => import('../../pages/admin/AdminApiPage.vue'),
         meta: { requiresSystemPermission: true },
       },
       {

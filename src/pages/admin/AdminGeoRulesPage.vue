@@ -10,14 +10,25 @@ import StatusBadge from '../../widgets/entity/StatusBadge.vue'
 const router = useRouter()
 const platform = usePlatformStore()
 
+const operatorLabels: Record<string, string> = {
+  INTERSECTS: 'Пересекается',
+  WITHIN: 'Внутри',
+  DISTANCE: 'На расстоянии',
+}
+
+const severityLabels: Record<string, string> = {
+  warning: 'Предупреждение',
+  error: 'Ошибка',
+}
+
 const rows = computed<Record<string, unknown>[]>(() =>
   platform.geoRules.map((rule) => ({
     id: rule.id,
     name: rule.name,
     entity: platform.schemaById(rule.entityId)?.name ?? rule.entityId,
-    operator: rule.operator,
+    operator: operatorLabels[rule.operator] ?? rule.operator,
     target: platform.schemaById(rule.targetEntityId)?.name ?? rule.targetEntityId,
-    severity: rule.severity,
+    severity: severityLabels[rule.severity] ?? rule.severity,
     status: rule.status,
   })),
 )
@@ -25,7 +36,7 @@ const rows = computed<Record<string, unknown>[]>(() =>
 
 <template>
   <div>
-    <UiPageHeader title="Гео-правила" description="Spatial validation rules для workflow и форм.">
+    <UiPageHeader title="Гео-правила" description="Правила пространственной проверки для процессов и форм.">
       <template #actions>
         <UiButton label="Создать правило" icon="pi pi-plus" @click="router.push('/admin/geo-rules/new')" />
       </template>
@@ -35,11 +46,11 @@ const rows = computed<Record<string, unknown>[]>(() =>
         :rows="rows"
         :columns="[
           { field: 'name', header: 'Название' },
-          { field: 'entity', header: 'Entity' },
-          { field: 'operator', header: 'Operator' },
-          { field: 'target', header: 'Target' },
-          { field: 'severity', header: 'Severity' },
-          { field: 'status', header: 'Status' },
+          { field: 'entity', header: 'Сущность' },
+          { field: 'operator', header: 'Оператор' },
+          { field: 'target', header: 'Цель' },
+          { field: 'severity', header: 'Важность' },
+          { field: 'status', header: 'Статус' },
         ]"
         @row-click="router.push(`/admin/geo-rules/${$event.id}`)"
       >

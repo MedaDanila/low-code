@@ -54,7 +54,7 @@ async function validate(payload: EntityFormPayload) {
 
 <template>
   <div>
-    <UiPageHeader v-if="schema && object" :title="schema.name" description="Карточка строится динамически из EntitySchema." />
+    <UiPageHeader v-if="schema && object" :title="schema.name" description="Карточка строится динамически по схеме сущности." />
     <UiEmptyState v-if="!schema || !object" title="Объект не найден" />
     <div v-else-if="editing" class="panel">
       <EntityForm
@@ -74,7 +74,7 @@ async function validate(payload: EntityFormPayload) {
       </EntityForm>
     </div>
     <EntityCard v-else :schema="schema" :object="object" @edit="editing = true" />
-    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Geo validation">
+    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Проверка геометрии">
       <GeoValidationResult
         :result="validationResult"
         @close="validationVisible = false"

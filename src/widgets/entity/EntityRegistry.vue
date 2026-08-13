@@ -79,11 +79,11 @@ function createObject() {
     <UiToolbar>
       <UiInput v-model="search" placeholder="Поиск" />
       <UiSelect v-model="status" :options="statusOptions" />
-      <UiButton label="Filters" icon="pi pi-filter" severity="secondary" variant="outlined" />
-      <UiButton label="Period" icon="pi pi-calendar" severity="secondary" variant="outlined" />
-      <UiButton label="Columns" icon="pi pi-table" severity="secondary" variant="outlined" />
+      <UiButton label="Фильтры" icon="pi pi-filter" severity="secondary" variant="outlined" />
+      <UiButton label="Период" icon="pi pi-calendar" severity="secondary" variant="outlined" />
+      <UiButton label="Колонки" icon="pi pi-table" severity="secondary" variant="outlined" />
       <template #actions>
-        <UiButton label="Export" icon="pi pi-download" severity="secondary" variant="outlined" />
+        <UiButton label="Экспорт" icon="pi pi-download" severity="secondary" variant="outlined" />
         <UiButton
           v-if="permissions.can('create', schema.id)"
           :label="`Создать ${schema.name.toLowerCase()}`"

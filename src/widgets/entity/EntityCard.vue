@@ -54,7 +54,7 @@ const documentRows = computed<Record<string, unknown>[]>(() =>
     name: attachment.name,
     type: attachment.type,
     date: formatDateTime(attachment.date),
-    author: platform.userById(attachment.authorId)?.lastName ?? 'System',
+    author: platform.userById(attachment.authorId)?.lastName ?? 'Система',
     size: attachment.size,
   })),
 )
@@ -81,7 +81,7 @@ function showGeoConflict(result: GeoValidationResultType) {
         </div>
         <div class="inline-actions">
           <UiButton label="Редактировать" icon="pi pi-pencil" severity="secondary" variant="outlined" @click="emit('edit')" />
-          <UiButton label="Menu" icon="pi pi-ellipsis-v" severity="secondary" variant="outlined" />
+          <UiButton label="Меню" icon="pi pi-ellipsis-v" severity="secondary" variant="outlined" />
         </div>
       </div>
 
@@ -99,7 +99,7 @@ function showGeoConflict(result: GeoValidationResultType) {
       />
       <div v-else-if="activeTab === 'documents'" class="stack">
         <div class="inline-actions">
-          <UiButton label="Upload" icon="pi pi-upload" severity="secondary" variant="outlined" />
+          <UiButton label="Загрузить" icon="pi pi-upload" severity="secondary" variant="outlined" />
           <UiButton label="Сформировать документ" icon="pi pi-file-pdf" @click="generateDocument" />
         </div>
         <UiTable
@@ -121,7 +121,7 @@ function showGeoConflict(result: GeoValidationResultType) {
       <WorkflowActions :schema="schema" :object="object" @geo-conflict="showGeoConflict" />
     </aside>
 
-    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Geo validation">
+    <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Проверка геометрии">
       <GeoValidationResult
         :result="validationResult"
         @close="validationVisible = false"

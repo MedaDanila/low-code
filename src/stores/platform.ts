@@ -99,7 +99,7 @@ export const usePlatformStore = defineStore('platform', () => {
   async function createSchema(input: {
     name: string
     description?: string
-    geometryType: EntitySchema['geometryType']
+    geometryType?: EntitySchema['geometryType']
   }): Promise<EntitySchema> {
     const schema = await repositories.entitySchemas.create(input)
     await refresh()
@@ -130,6 +130,11 @@ export const usePlatformStore = defineStore('platform', () => {
     return schema
   }
 
+  async function deleteSchema(id: string): Promise<void> {
+    await repositories.entitySchemas.delete(id)
+    await refresh()
+  }
+
   async function createObject(input: {
     entityId: string
     values: EntityObjectValues
@@ -139,6 +144,17 @@ export const usePlatformStore = defineStore('platform', () => {
     const object = await repositories.entityObjects.create(input)
     await refresh()
     return object
+  }
+
+  async function importObjects(inputs: Array<{
+    entityId: string
+    values: EntityObjectValues
+    geometry?: EntityObject['geometry']
+    actorId: string
+  }>): Promise<EntityObject[]> {
+    const objects = await repositories.entityObjects.createMany(inputs)
+    await refresh()
+    return objects
   }
 
   async function updateObject(input: {
@@ -257,8 +273,8 @@ export const usePlatformStore = defineStore('platform', () => {
       required: false,
       listVisible: true,
       cardVisible: true,
-      searchable: false,
-      filterable: false,
+      searchable: true,
+      filterable: true,
       order,
     }
   }
@@ -356,7 +372,9 @@ export const usePlatformStore = defineStore('platform', () => {
     publishSchema,
     archiveSchema,
     duplicateSchema,
+    deleteSchema,
     createObject,
+    importObjects,
     updateObject,
     validateObject,
     applyWorkflowTransition,

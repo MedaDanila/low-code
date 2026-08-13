@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
+import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import { usePlatformStore } from '../../stores/platform'
 import EntityPropertyList from '../../widgets/entity/EntityPropertyList.vue'
@@ -14,6 +15,8 @@ const router = useRouter()
 const platform = usePlatformStore()
 const visibleLayerIds = ref<string[]>([])
 const selectedObject = ref<EntityObject | null>(null)
+const hasPublishedEntities = computed(() => platform.activeSchemas.length > 0)
+const hasMapObjects = computed(() => platform.entityObjects.some((object) => Boolean(object.geometry)))
 
 watch(
   () => platform.layers,
@@ -44,14 +47,30 @@ function openSelected() {
 
 <template>
   <div>
-    <UiPageHeader title="Глобальная карта" description="Единая GIS-витрина опубликованных сущностей и слоёв.">
+    <UiPageHeader title="Глобальная карта" description="Единая картографическая витрина опубликованных сущностей и слоёв.">
       <template #actions>
-        <UiButton label="Select" icon="pi pi-crosshairs" severity="secondary" variant="outlined" />
-        <UiButton label="Layers" icon="pi pi-list" severity="secondary" variant="outlined" />
+        <UiButton label="Выбрать" icon="pi pi-crosshairs" severity="secondary" variant="outlined" />
+        <UiButton label="Слои" icon="pi pi-list" severity="secondary" variant="outlined" />
       </template>
     </UiPageHeader>
 
-    <section class="page-grid two">
+    <UiEmptyState
+      v-if="!hasPublishedEntities"
+      title="Карта пока пустая"
+      description="Опубликуйте сущность с геометрией, чтобы на карте появились слои."
+    >
+      <UiButton label="Создать сущность" icon="pi pi-plus" @click="router.push('/admin/entities/new')" />
+    </UiEmptyState>
+
+    <UiEmptyState
+      v-else-if="!hasMapObjects"
+      title="На карте пока нет объектов"
+      description="Создайте объект вручную или импортируйте таблицу с адресами, чтобы координаты появились автоматически."
+    >
+      <UiButton label="Импортировать данные" icon="pi pi-upload" @click="router.push('/admin/import')" />
+    </UiEmptyState>
+
+    <section v-else class="page-grid two">
       <div class="panel">
         <MapCanvas
           :layers="platform.layers"

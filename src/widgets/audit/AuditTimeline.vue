@@ -14,7 +14,7 @@ const filter = ref('all')
 const tabs = [
   { label: 'Все', value: 'all' },
   { label: 'Изменения', value: 'change' },
-  { label: 'Workflow', value: 'workflow' },
+  { label: 'Процесс', value: 'workflow' },
   { label: 'Документы', value: 'document' },
 ]
 
@@ -29,7 +29,7 @@ const filteredEvents = computed(() =>
     <div class="audit__list">
       <article v-for="event in filteredEvents" :key="event.id" class="audit__event">
         <time>{{ formatDateTime(event.at) }}</time>
-        <strong>{{ platform.userById(event.actorId)?.lastName ?? 'System' }}</strong>
+        <strong>{{ platform.userById(event.actorId)?.lastName ?? 'Система' }}</strong>
         <span>{{ event.title }}</span>
         <small v-if="event.details">{{ event.details }}</small>
       </article>

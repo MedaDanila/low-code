@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
+import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import UiTabs from '../../shared/ui/UiTabs.vue'
 import { formatValue } from '../../shared/lib/format'
@@ -37,7 +38,7 @@ function openTask(entityId: string, objectId: string) {
 
 <template>
   <div>
-    <UiPageHeader title="Мои задачи" description="Workflow transitions создают задачи для ответственных ролей." />
+    <UiPageHeader title="Мои задачи" description="Переходы процессов создают задачи для ответственных ролей." />
     <div class="panel stack">
       <UiTabs v-model="tab" :tabs="tabs" />
       <article v-for="task in filteredTasks" :key="task.id" class="task-row">
@@ -50,7 +51,11 @@ function openTask(entityId: string, objectId: string) {
         <StatusBadge :status="task.status" />
         <UiButton label="Открыть" severity="secondary" variant="outlined" @click="openTask(task.entityId, task.objectId)" />
       </article>
-      <p v-if="filteredTasks.length === 0" class="muted">Задач в этой вкладке нет.</p>
+      <UiEmptyState
+        v-if="filteredTasks.length === 0"
+        title="Задач пока нет"
+        description="Задачи появятся после настройки процессов и переходов по объектам."
+      />
     </div>
   </div>
 </template>

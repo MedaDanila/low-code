@@ -72,7 +72,16 @@ async function addDictionary() {
       </template>
     </UiPageHeader>
 
-    <section class="panel stack">
+    <section v-if="entityOptions.length === 0" class="panel">
+      <UiEmptyState
+        title="Нет сущностей для справочников"
+        description="Справочники создаются внутри сущности. Сначала создайте и опубликуйте сущность."
+      >
+        <UiButton label="Создать сущность" icon="pi pi-plus" @click="router.push('/admin/entities/new')" />
+      </UiEmptyState>
+    </section>
+
+    <section v-else class="panel stack">
       <div class="form-field">
         <label for="dictionary-entity">Сущность</label>
         <UiSelect
@@ -86,7 +95,7 @@ async function addDictionary() {
       <UiEmptyState
         v-if="selectedEntity && dictionaryRows.length === 0"
         title="У сущности пока нет справочников"
-        description="Создайте справочник, затем подключите его к Enum-полю в Entity Builder."
+        description="Создайте справочник, затем подключите его к полю типа «Справочник» в конструкторе сущности."
       >
         <UiButton label="Добавить справочник" icon="pi pi-plus" @click="addDictionary" />
       </UiEmptyState>

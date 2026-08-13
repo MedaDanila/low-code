@@ -12,6 +12,11 @@ const emit = defineEmits<{
   showOnMap: []
   close: []
 }>()
+
+const severityLabels: Record<string, string> = {
+  error: 'Ошибка',
+  warning: 'Предупреждение',
+}
 </script>
 
 <template>
@@ -27,7 +32,7 @@ const emit = defineEmits<{
         <span>{{ conflict.targetSchema.name }} №{{ formatValue(conflict.targetObject.values.number) }}</span>
         <span v-if="conflict.targetObject.values.address">Адрес: {{ formatValue(conflict.targetObject.values.address) }}</span>
         <span v-if="conflict.targetObject.values.endDate">Гарантия: до {{ formatValue(conflict.targetObject.values.endDate) }}</span>
-        <UiBadge :label="conflict.rule.severity.toUpperCase()" :tone="conflict.rule.severity === 'error' ? 'danger' : 'warning'" />
+        <UiBadge :label="severityLabels[conflict.rule.severity] ?? conflict.rule.severity" :tone="conflict.rule.severity === 'error' ? 'danger' : 'warning'" />
       </div>
     </template>
     <div class="inline-actions">

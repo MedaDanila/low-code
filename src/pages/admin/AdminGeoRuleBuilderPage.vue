@@ -34,14 +34,14 @@ async function save() {
   if (!rule.value) return
   rule.value.status = 'active'
   const saved = await platform.saveGeoRule(rule.value)
-  toast.add({ severity: 'success', summary: 'Geo Rule сохранено', detail: saved.name, life: 2400 })
+  toast.add({ severity: 'success', summary: 'Гео-правило сохранено', detail: saved.name, life: 2400 })
   router.push('/admin/geo-rules')
 }
 </script>
 
 <template>
   <div>
-    <UiPageHeader title="Geo Rule Builder" description="Rule builder для spatial checks.">
+    <UiPageHeader title="Конструктор гео-правила" description="Конструктор правил для пространственных проверок.">
       <template #actions>
         <UiButton label="Сохранить" icon="pi pi-save" @click="save" />
       </template>

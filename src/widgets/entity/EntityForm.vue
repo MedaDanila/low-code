@@ -40,6 +40,11 @@ const tabs = computed(() => [
 ])
 
 const orderedFields = computed(() => [...props.schema.fields].sort((a, b) => a.order - b.order))
+const addressValue = computed(() => {
+  const addressField = orderedFields.value.find((field) => field.type === 'address')
+  const value = addressField ? values[addressField.code] : ''
+  return typeof value === 'string' ? value : ''
+})
 
 watch(
   () => [props.schema.id, props.object?.id],
@@ -69,10 +74,6 @@ function validateAndSubmit() {
     return
   }
   emit('submit', { values: { ...values }, geometry: geometry.value })
-}
-
-function runGeoValidation() {
-  emit('validate', { values: { ...values }, geometry: geometry.value })
 }
 
 function defaultValue(type: EntitySchema['fields'][number]['type']): ObjectValue {
@@ -115,8 +116,8 @@ function defaultValue(type: EntitySchema['fields'][number]['type']): ObjectValue
         v-model="geometry"
         :geometry-type="schema.geometryType"
         :conflict-geometries="conflictGeometries"
+        :fallback-address="addressValue"
         height="420px"
-        @validate="runGeoValidation"
       />
     </section>
 

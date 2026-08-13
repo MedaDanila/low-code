@@ -33,9 +33,14 @@ const rows = computed<Record<string, unknown>[]>(() =>
     login: user.login,
     organization: platform.organizations.find((org) => org.id === user.organizationId)?.name,
     roles: user.roleIds.map((id) => platform.roleById(id)?.name).filter(Boolean).join(', '),
-    status: user.status,
+    status: userStatusLabels[user.status] ?? user.status,
   })),
 )
+
+const userStatusLabels: Record<string, string> = {
+  active: 'Активен',
+  blocked: 'Заблокирован',
+}
 
 const organizationOptions = computed(() => platform.organizations.map((org) => ({ label: org.name, value: org.id })))
 
@@ -68,9 +73,9 @@ async function save() {
 
 <template>
   <div>
-    <UiPageHeader title="Пользователи" description="Accounts, organizations and roles.">
+    <UiPageHeader title="Пользователи" description="Учётные записи, организации и роли.">
       <template #actions>
-        <UiButton label="Create" icon="pi pi-plus" @click="createUser" />
+        <UiButton label="Создать" icon="pi pi-plus" @click="createUser" />
       </template>
     </UiPageHeader>
     <section class="split-layout">
@@ -92,12 +97,12 @@ async function save() {
           <div class="form-field"><label>Фамилия</label><UiInput v-model="editable.lastName" /></div>
           <div class="form-field"><label>Имя</label><UiInput v-model="editable.firstName" /></div>
           <div class="form-field"><label>Отчество</label><UiInput v-model="editable.middleName" /></div>
-          <div class="form-field"><label>Login</label><UiInput v-model="editable.login" /></div>
-          <div class="form-field"><label>Organization</label><UiSelect v-model="editable.organizationId" :options="organizationOptions" /></div>
-          <div class="form-field"><label>Status</label><UiSelect v-model="editable.status" :options="[{ label: 'Active', value: 'active' }, { label: 'Blocked', value: 'blocked' }]" /></div>
+          <div class="form-field"><label>Логин</label><UiInput v-model="editable.login" /></div>
+          <div class="form-field"><label>Организация</label><UiSelect v-model="editable.organizationId" :options="organizationOptions" /></div>
+          <div class="form-field"><label>Статус</label><UiSelect v-model="editable.status" :options="[{ label: 'Активен', value: 'active' }, { label: 'Заблокирован', value: 'blocked' }]" /></div>
         </div>
         <div class="stack">
-          <span class="muted">Roles</span>
+          <span class="muted">Роли</span>
           <label v-for="role in platform.roles" :key="role.id">
             <Checkbox
               :model-value="editable.roleIds.includes(role.id)"
