@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
+  ArrowLeft,
   Building2,
   Database,
   FileInput,
@@ -11,20 +12,18 @@ import {
   ListChecks,
   Map,
   MapPinned,
-  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
   Shield,
   Users,
-  Workflow,
 } from '@lucide/vue'
 import { usePlatformStore } from '../../stores/platform'
 import { usePermissions } from '../../shared/lib/usePermissions'
 import type { EntitySchema } from '../../shared/types/domain'
 
 const props = defineProps<{
-  mode: 'runtime' | 'admin'
+  mode: 'runtime' | 'settings'
 }>()
 
 const collapsed = defineModel<boolean>('collapsed', { default: false })
@@ -39,15 +38,19 @@ const runtimeUtilityItems = [
 const adminItems = [
   { label: 'Сущности', to: '/admin/entities', icon: Database },
   { label: 'Справочники', to: '/admin/dictionaries', icon: ListChecks },
-  { label: 'Процессы', to: '/admin/workflows', icon: Workflow },
-  { label: 'Гео-правила', to: '/admin/geo-rules', icon: Network },
   { label: 'Слои', to: '/admin/layers', icon: Layers },
   { label: 'Пользователи', to: '/admin/users', icon: Users },
   { label: 'Роли', to: '/admin/roles', icon: Shield },
   { label: 'Организации', to: '/admin/organizations', icon: Building2 },
   { label: 'Импорт', to: '/admin/import', icon: FileInput },
-  { label: 'Настройки', to: '/admin/settings', icon: Settings },
+  { label: 'Платформа', to: '/admin/settings', icon: Settings },
 ]
+
+const userSettingsItems = [
+  { label: 'Главный экран', to: '/admin/home', icon: Home },
+]
+
+const canOpenSystemSettings = computed(() => permissions.can('view'))
 
 const runtimeEntityItems = computed(() =>
   platform.runtimeSchemas
@@ -73,7 +76,7 @@ const runtimeEntityItems = computed(() =>
       <span v-if="!collapsed">Скрыть</span>
     </button>
 
-    <nav v-if="mode === 'runtime'" class="sidebar__nav" aria-label="Runtime навигация">
+    <nav v-if="mode === 'runtime'" class="sidebar__nav sidebar__nav--runtime" aria-label="Runtime навигация">
       <div class="sidebar__section sidebar__section--utility">
         <RouterLink
           v-for="item in runtimeUtilityItems"
@@ -99,11 +102,34 @@ const runtimeEntityItems = computed(() =>
       </div>
     </nav>
 
-    <nav v-else class="sidebar__nav" aria-label="Administration навигация">
-      <RouterLink v-for="item in adminItems" :key="item.to" :to="item.to" class="sidebar__link">
-        <component :is="item.icon" :size="17" />
-        <span v-if="!collapsed">{{ item.label }}</span>
-      </RouterLink>
+    <nav v-else class="sidebar__nav sidebar__nav--settings" aria-label="Настройки">
+      <div class="sidebar__section sidebar__section--user-settings">
+        <p v-if="!collapsed" class="sidebar__group-label">Настройки пользователя</p>
+        <RouterLink v-for="item in userSettingsItems" :key="item.to" :to="item.to" class="sidebar__link">
+          <component :is="item.icon" :size="17" />
+          <span v-if="!collapsed">{{ item.label }}</span>
+        </RouterLink>
+      </div>
+
+      <div v-if="canOpenSystemSettings" class="sidebar__section sidebar__section--system-settings">
+        <p v-if="!collapsed" class="sidebar__group-label">Настройки системы</p>
+        <RouterLink v-for="item in adminItems" :key="item.to" :to="item.to" class="sidebar__link">
+          <component :is="item.icon" :size="17" />
+          <span v-if="!collapsed">{{ item.label }}</span>
+        </RouterLink>
+      </div>
     </nav>
+
+    <div class="sidebar__bottom">
+      <RouterLink v-if="mode === 'runtime'" to="/admin/home" class="sidebar__link sidebar__link--settings">
+        <Settings :size="17" />
+        <span v-if="!collapsed">Настройки</span>
+      </RouterLink>
+
+      <RouterLink v-else to="/app/dashboard" class="sidebar__link sidebar__link--settings">
+        <ArrowLeft :size="17" />
+        <span v-if="!collapsed">Назад</span>
+      </RouterLink>
+    </div>
   </aside>
 </template>

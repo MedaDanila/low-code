@@ -223,6 +223,48 @@ export interface PlatformSettings {
   dateTimeFormat: string
 }
 
+export type SummaryMetric = 'count' | 'filled' | 'empty' | 'unique' | 'sum' | 'average'
+export type DashboardFilterOperator =
+  | 'equals'
+  | 'notEquals'
+  | 'contains'
+  | 'filled'
+  | 'empty'
+  | 'today'
+  | 'beforeToday'
+  | 'afterToday'
+  | 'before'
+  | 'after'
+
+export interface DashboardFilter {
+  id: string
+  fieldCode: string
+  operator: DashboardFilterOperator
+  value: string
+}
+
+export interface DashboardSummaryBlock {
+  id: string
+  entityId: string
+  fieldCode: string
+  metric: SummaryMetric
+  title: string
+  showInfo: boolean
+  description: string
+  widthPx: number
+  order: number
+  filters: DashboardFilter[]
+}
+
+export interface UserHomeSettings {
+  summaryBlocks: DashboardSummaryBlock[]
+}
+
+export interface UserSettings {
+  userId: string
+  home: UserHomeSettings
+}
+
 export interface AppDatabase {
   entitySchemas: EntitySchema[]
   entityObjects: EntityObject[]
@@ -237,4 +279,5 @@ export interface AppDatabase {
   attachments: Attachment[]
   auditEvents: AuditEvent[]
   settings: PlatformSettings
+  userSettings: UserSettings[]
 }

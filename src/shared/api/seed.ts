@@ -11,6 +11,7 @@ import type {
   Role,
   Task,
   User,
+  UserSettings,
   Workflow,
 } from '../types/domain'
 
@@ -410,6 +411,94 @@ export function createSeedDatabase(): AppDatabase {
       mapZoom: 12,
       sessionTimeoutMinutes: 60,
       dateTimeFormat: 'dd.MM.yyyy HH:mm',
+    },
+    userSettings: users.map((user) => defaultUserSettings(user.id)),
+  }
+}
+
+function defaultUserSettings(userId: string): UserSettings {
+  return {
+    userId,
+    home: {
+      summaryBlocks: [
+        {
+          id: `sum_${userId}_orders_count`,
+          entityId: 'ent_orders',
+          fieldCode: '',
+          metric: 'count',
+          title: 'Всего ордеров',
+          showInfo: true,
+          description: 'Общее количество объектов сущности «Ордера».',
+          widthPx: 220,
+          order: 1,
+          filters: [],
+        },
+        {
+          id: `sum_${userId}_orders_created_today`,
+          entityId: 'ent_orders',
+          fieldCode: '',
+          metric: 'count',
+          title: 'Ордера, заведённые сегодня',
+          showInfo: true,
+          description: 'Количество ордеров, у которых дата создания совпадает с текущей датой.',
+          widthPx: 280,
+          order: 2,
+          filters: [
+            { id: `flt_${userId}_orders_created_today`, fieldCode: '__createdAt', operator: 'today', value: '' },
+          ],
+        },
+        {
+          id: `sum_${userId}_orders_active_future`,
+          entityId: 'ent_orders',
+          fieldCode: '',
+          metric: 'count',
+          title: 'Ордера в работе',
+          showInfo: true,
+          description: 'Количество ордеров со статусом «В работе» и датой окончания позже текущей даты.',
+          widthPx: 460,
+          order: 3,
+          filters: [
+            { id: `flt_${userId}_orders_active`, fieldCode: '__status', operator: 'equals', value: 'active' },
+            { id: `flt_${userId}_orders_end_future`, fieldCode: 'endDate', operator: 'afterToday', value: '' },
+          ],
+        },
+        {
+          id: `sum_${userId}_orders_contractors`,
+          entityId: 'ent_orders',
+          fieldCode: 'contractor',
+          metric: 'unique',
+          title: 'Подрядчики',
+          showInfo: true,
+          description: 'Количество уникальных значений в поле «Исполнитель».',
+          widthPx: 220,
+          order: 4,
+          filters: [],
+        },
+        {
+          id: `sum_${userId}_warranty_count`,
+          entityId: 'ent_warranty',
+          fieldCode: '',
+          metric: 'count',
+          title: 'Гарантийные участки',
+          showInfo: true,
+          description: 'Общее количество объектов сущности «Гарантийные участки».',
+          widthPx: 260,
+          order: 5,
+          filters: [],
+        },
+        {
+          id: `sum_${userId}_playgrounds_year`,
+          entityId: 'ent_playgrounds',
+          fieldCode: 'installationYear',
+          metric: 'average',
+          title: 'Средний год установки',
+          showInfo: true,
+          description: 'Среднее значение поля «Год установки» по детским площадкам.',
+          widthPx: 460,
+          order: 6,
+          filters: [],
+        },
+      ],
     },
   }
 }

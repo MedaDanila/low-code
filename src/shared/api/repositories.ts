@@ -8,6 +8,8 @@ import type {
   AppDatabase,
   Attachment,
   AuditEvent,
+  DashboardFilter,
+  DashboardSummaryBlock,
   Dictionary,
   DictionaryItem,
   EntityObject,
@@ -21,12 +23,25 @@ import type {
   PlatformSettings,
   Role,
   User,
+  UserSettings,
   Workflow,
 } from '../types/domain'
 import { createSeedDatabase } from './seed'
 
 const STORAGE_KEY = 'low-code-gis-platform-db-v1'
 const latencyRange = [220, 480] as const
+const SUMMARY_WIDTH_STEP_PX = 10
+const SUMMARY_DEFAULT_WIDTH_PX = 220
+const LEGACY_SUMMARY_WIDTHS: Record<string, number> = {
+  small: 220,
+  medium: 460,
+  large: 940,
+}
+
+type StoredSummaryBlock = Omit<DashboardSummaryBlock, 'widthPx'> & {
+  widthPx?: number
+  width?: keyof typeof LEGACY_SUMMARY_WIDTHS
+}
 
 export interface CreateEntitySchemaInput {
   name: string
@@ -525,6 +540,26 @@ export const repositories = {
       return settings
     },
   },
+
+  userSettings: {
+    async getByUser(userId: string) {
+      const db = readDb()
+      const settings = ensureUserSettings(db, userId)
+      writeDb(db)
+      await delay()
+      return settings
+    },
+    async save(settings: UserSettings) {
+      const db = readDb()
+      const normalized = normalizeUserSettings(settings, db)
+      db.userSettings = db.userSettings.some((item) => item.userId === settings.userId)
+        ? db.userSettings.map((item) => (item.userId === settings.userId ? normalized : item))
+        : [...db.userSettings, normalized]
+      writeDb(db)
+      await delay()
+      return normalized
+    },
+  },
 }
 
 function readDb(): AppDatabase {
@@ -550,13 +585,17 @@ function migrateDb(db: AppDatabase): AppDatabase {
     parking_type: 'ent_orders',
   }
   const fallbackEntityId = db.entitySchemas[0]?.id ?? 'ent_orders'
-  return {
+  const migrated: AppDatabase = {
     ...db,
     dictionaries: db.dictionaries.map((dictionary) => ({
       ...dictionary,
       entityId: dictionary.entityId ?? dictionaryEntityByCode[dictionary.code] ?? fallbackEntityId,
     })),
+    userSettings: db.userSettings ?? [],
   }
+  migrated.users.forEach((user) => ensureUserSettings(migrated, user.id))
+  migrated.userSettings = migrated.userSettings.map((settings) => normalizeUserSettings(settings, migrated))
+  return migrated
 }
 
 function delay(): Promise<void> {
@@ -707,6 +746,140 @@ function migrateWorkflowStateCodes(
     const change = changes.find((item) => item.oldCode === object.status)
     return change ? { ...object, status: change.newCode } : object
   })
+}
+
+function ensureUserSettings(db: AppDatabase, userId: string): UserSettings {
+  let settings = db.userSettings.find((item) => item.userId === userId)
+  if (!settings) {
+    settings = defaultUserSettings(userId)
+    db.userSettings.push(settings)
+  }
+  return settings
+}
+
+function defaultUserSettings(userId: string): UserSettings {
+  return {
+    userId,
+    home: {
+      summaryBlocks: [
+        summaryBlock(userId, 'orders_count', 'ent_orders', '', 'count', 'Всего ордеров', 220, 1),
+        summaryBlock(userId, 'orders_created_today', 'ent_orders', '', 'count', 'Ордера, заведённые сегодня', 280, 2, [
+          filter(userId, 'orders_created_today', '__createdAt', 'today', ''),
+        ]),
+        summaryBlock(userId, 'orders_active_future', 'ent_orders', '', 'count', 'Ордера в работе', 460, 3, [
+          filter(userId, 'orders_active', '__status', 'equals', 'active'),
+          filter(userId, 'orders_end_future', 'endDate', 'afterToday', ''),
+        ]),
+        summaryBlock(userId, 'orders_contractors', 'ent_orders', 'contractor', 'unique', 'Подрядчики', 220, 4),
+        summaryBlock(userId, 'warranty_count', 'ent_warranty', '', 'count', 'Гарантийные участки', 260, 5),
+        summaryBlock(userId, 'playgrounds_year', 'ent_playgrounds', 'installationYear', 'average', 'Средний год установки', 460, 6),
+      ],
+    },
+  }
+}
+
+function summaryBlock(
+  userId: string,
+  idSuffix: string,
+  entityId: string,
+  fieldCode: string,
+  metric: DashboardSummaryBlock['metric'],
+  title: string,
+  widthPx: number,
+  order: number,
+  filters: DashboardFilter[] = [],
+): DashboardSummaryBlock {
+  return {
+    id: `sum_${userId}_${idSuffix}`,
+    entityId,
+    fieldCode,
+    metric,
+    title,
+    showInfo: false,
+    description: '',
+    widthPx,
+    order,
+    filters,
+  }
+}
+
+function filter(
+  userId: string,
+  idSuffix: string,
+  fieldCode: string,
+  operator: DashboardFilter['operator'],
+  value: string,
+): DashboardFilter {
+  return {
+    id: `flt_${userId}_${idSuffix}`,
+    fieldCode,
+    operator,
+    value,
+  }
+}
+
+function normalizeUserSettings(settings: UserSettings, db: AppDatabase): UserSettings {
+  const entityIds = new Set(db.entitySchemas.map((schema) => schema.id))
+  const blocks = (settings.home?.summaryBlocks ?? [])
+    .filter((block) => entityIds.has(block.entityId))
+    .map((sourceBlock, index) => {
+      const block = sourceBlock as StoredSummaryBlock
+      const schema = db.entitySchemas.find((candidate) => candidate.id === block.entityId)
+      const fieldExists = Boolean(block.fieldCode && schema?.fields.some((field) => field.code === block.fieldCode))
+      const fieldCode = block.metric === 'count' ? '' : fieldExists ? block.fieldCode : schema?.fields[0]?.code ?? ''
+      const filters = normalizeDashboardFilters(block.filters ?? [], schema)
+      return {
+        id: block.id || createId('sum'),
+        entityId: block.entityId,
+        fieldCode,
+        metric: block.metric,
+        title: String(block.title ?? '').trim() || defaultSummaryTitle(block, db),
+        showInfo: Boolean(String(block.description ?? '').trim() || filters.length),
+        description: String(block.description ?? '').trim(),
+        widthPx: normalizeSummaryWidth(block),
+        order: index + 1,
+        filters,
+      }
+    })
+
+  return {
+    userId: settings.userId,
+    home: { summaryBlocks: blocks },
+  }
+}
+
+function normalizeSummaryWidth(block: StoredSummaryBlock): number {
+  const rawWidth = Number.isFinite(block.widthPx)
+    ? Number(block.widthPx)
+    : LEGACY_SUMMARY_WIDTHS[String(block.width ?? '')] ?? SUMMARY_DEFAULT_WIDTH_PX
+
+  return Math.max(SUMMARY_DEFAULT_WIDTH_PX, Math.round(rawWidth / SUMMARY_WIDTH_STEP_PX) * SUMMARY_WIDTH_STEP_PX)
+}
+
+function normalizeDashboardFilters(filters: DashboardFilter[], schema: EntitySchema | undefined): DashboardFilter[] {
+  return filters
+    .filter((filterItem) => isValidDashboardFilterField(filterItem.fieldCode, schema))
+    .map((filterItem) => ({
+      id: filterItem.id || createId('flt'),
+      fieldCode: filterItem.fieldCode,
+      operator: filterItem.operator,
+      value: String(filterItem.value ?? ''),
+    }))
+}
+
+function isValidDashboardFilterField(fieldCode: string, schema: EntitySchema | undefined): boolean {
+  if (fieldCode === '__status' || fieldCode === '__createdAt' || fieldCode === '__updatedAt') return true
+  return Boolean(schema?.fields.some((field) => field.code === fieldCode))
+}
+
+function defaultSummaryTitle(
+  block: Pick<DashboardSummaryBlock, 'entityId' | 'fieldCode' | 'metric'>,
+  db: AppDatabase,
+): string {
+  const schema = db.entitySchemas.find((candidate) => candidate.id === block.entityId)
+  const field = schema?.fields.find((candidate) => candidate.code === block.fieldCode)
+  if (block.metric === 'count') return schema?.name ?? 'Саммари'
+  return field ? `${schema?.name ?? 'Сущность'} · ${field.name}` : schema?.name ?? 'Саммари'
 }
 
 function grantDefaultPermissions(db: AppDatabase, entityId: string): void {

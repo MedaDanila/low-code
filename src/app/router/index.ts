@@ -42,25 +42,86 @@ const routes: RouteRecordRaw[] = [
     component: AppLayout,
     meta: { requiresAuth: true },
     children: [
-      { path: '', redirect: '/admin/entities' },
-      { path: 'entities', name: 'admin-entities', component: () => import('../../pages/admin/AdminEntitiesPage.vue') },
-      { path: 'entities/new', name: 'admin-entity-create', component: () => import('../../pages/admin/AdminEntityCreatePage.vue') },
-      { path: 'entities/:id', name: 'admin-entity-builder', component: () => import('../../pages/admin/AdminEntityBuilderPage.vue') },
-      { path: 'dictionaries', name: 'admin-dictionaries', component: () => import('../../pages/admin/AdminDictionariesPage.vue') },
-      { path: 'dictionaries/:id', name: 'admin-dictionary-details', component: () => import('../../pages/admin/AdminDictionaryDetailsPage.vue') },
-      { path: 'workflows', name: 'admin-workflows', component: () => import('../../pages/admin/AdminWorkflowsPage.vue') },
-      { path: 'workflows/:id', name: 'admin-workflow-builder', component: () => import('../../pages/admin/AdminWorkflowBuilderPage.vue') },
-      { path: 'geo-rules', name: 'admin-geo-rules', component: () => import('../../pages/admin/AdminGeoRulesPage.vue') },
-      { path: 'geo-rules/new', name: 'admin-geo-rule-create', component: () => import('../../pages/admin/AdminGeoRuleBuilderPage.vue') },
-      { path: 'geo-rules/:id', name: 'admin-geo-rule-builder', component: () => import('../../pages/admin/AdminGeoRuleBuilderPage.vue') },
-      { path: 'layers', name: 'admin-layers', component: () => import('../../pages/admin/AdminLayersPage.vue') },
-      { path: 'users', name: 'admin-users', component: () => import('../../pages/admin/AdminUsersPage.vue') },
-      { path: 'users/:id', name: 'admin-user-details', component: () => import('../../pages/admin/AdminUsersPage.vue') },
-      { path: 'roles', name: 'admin-roles', component: () => import('../../pages/admin/AdminRolesPage.vue') },
-      { path: 'roles/:id', name: 'admin-role-details', component: () => import('../../pages/admin/AdminRolesPage.vue') },
-      { path: 'organizations', name: 'admin-organizations', component: () => import('../../pages/admin/AdminOrganizationsPage.vue') },
-      { path: 'import', name: 'admin-import', component: () => import('../../pages/admin/AdminImportPage.vue') },
-      { path: 'settings', name: 'admin-settings', component: () => import('../../pages/admin/AdminSettingsPage.vue') },
+      { path: '', redirect: '/admin/home' },
+      { path: 'home', name: 'settings-home', component: () => import('../../pages/settings/HomeSettingsPage.vue') },
+      {
+        path: 'entities',
+        name: 'admin-entities',
+        component: () => import('../../pages/admin/AdminEntitiesPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'entities/new',
+        name: 'admin-entity-create',
+        component: () => import('../../pages/admin/AdminEntityCreatePage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'entities/:id',
+        name: 'admin-entity-builder',
+        component: () => import('../../pages/admin/AdminEntityBuilderPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'dictionaries',
+        name: 'admin-dictionaries',
+        component: () => import('../../pages/admin/AdminDictionariesPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'dictionaries/:id',
+        name: 'admin-dictionary-details',
+        component: () => import('../../pages/admin/AdminDictionaryDetailsPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'layers',
+        name: 'admin-layers',
+        component: () => import('../../pages/admin/AdminLayersPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'users',
+        name: 'admin-users',
+        component: () => import('../../pages/admin/AdminUsersPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'users/:id',
+        name: 'admin-user-details',
+        component: () => import('../../pages/admin/AdminUsersPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'roles',
+        name: 'admin-roles',
+        component: () => import('../../pages/admin/AdminRolesPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'roles/:id',
+        name: 'admin-role-details',
+        component: () => import('../../pages/admin/AdminRolesPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'organizations',
+        name: 'admin-organizations',
+        component: () => import('../../pages/admin/AdminOrganizationsPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'import',
+        name: 'admin-import',
+        component: () => import('../../pages/admin/AdminImportPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
+      {
+        path: 'settings',
+        name: 'admin-settings',
+        component: () => import('../../pages/admin/AdminSettingsPage.vue'),
+        meta: { requiresSystemPermission: true },
+      },
     ],
   },
 ]
@@ -80,9 +141,22 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
+  if (to.meta.requiresSystemPermission && !hasSystemAccess()) {
+    return { name: 'settings-home' }
+  }
+
   if (to.name === 'login' && auth.isAuthenticated) {
     return { name: 'dashboard' }
   }
 
   return true
 })
+
+function hasSystemAccess(): boolean {
+  const auth = useAuthStore()
+  const platform = usePlatformStore()
+  const roleIds = auth.currentUser?.roleIds ?? []
+  return platform.roles
+    .filter((role) => roleIds.includes(role.id))
+    .some((role) => role.permissions.some((permission) => permission.system && permission.view))
+}

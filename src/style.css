@@ -186,6 +186,7 @@ p-license-host {
 }
 
 .sidebar__nav {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -206,6 +207,25 @@ p-license-host {
 .sidebar__section--entities {
   border-radius: var(--radius-lg);
   background: rgba(37, 99, 235, 0.08);
+}
+
+.sidebar__section--system-settings {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar__group-label {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  color: var(--color-sidebar-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sidebar__bottom {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sidebar__link {
@@ -245,6 +265,11 @@ p-license-host {
 .sidebar__link--entity.router-link-active {
   border-color: rgba(147, 197, 253, 0.38);
   background: rgba(37, 99, 235, 0.28);
+}
+
+.sidebar__link--settings {
+  background: rgba(255, 255, 255, 0.07);
+  color: #eef2ff;
 }
 
 .page-grid {

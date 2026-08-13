@@ -34,7 +34,7 @@ async function resetDemo() {
 
 <template>
   <div>
-    <UiPageHeader title="Настройки" description="Базовая конфигурация платформы и карты." />
+    <UiPageHeader title="Платформа" description="Системная конфигурация платформы и карты." />
     <form v-if="editable" class="panel form-grid" @submit.prevent="save">
       <div class="form-field"><label>Platform name</label><UiInput v-model="editable.platformName" /></div>
       <div class="form-field"><label>Municipality name</label><UiInput v-model="editable.municipalityName" /></div>

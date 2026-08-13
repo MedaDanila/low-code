@@ -12,7 +12,7 @@ const auth = useAuthStore()
 const platform = usePlatformStore()
 const sidebarCollapsed = ref(false)
 
-const mode = computed(() => (route.path.startsWith('/admin') ? 'admin' : 'runtime'))
+const mode = computed(() => (route.path.startsWith('/admin') ? 'settings' : 'runtime'))
 const title = computed(() => platform.settings?.platformName ?? 'Муниципальная платформа')
 
 function logout() {

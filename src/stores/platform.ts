@@ -19,6 +19,7 @@ import type {
   Role,
   Task,
   User,
+  UserSettings,
   Workflow,
 } from '../shared/types/domain'
 
@@ -38,6 +39,7 @@ export const usePlatformStore = defineStore('platform', () => {
   const attachments = ref<Attachment[]>([])
   const auditEvents = ref<AuditEvent[]>([])
   const settings = ref<PlatformSettings | null>(null)
+  const userSettings = ref<UserSettings[]>([])
 
   const activeSchemas = computed(() => entitySchemas.value.filter((schema) => schema.status === 'active'))
   const runtimeSchemas = computed(() => activeSchemas.value.filter((schema) => schema.geometryType !== 'none' || schema.fields.length > 0))
@@ -88,6 +90,10 @@ export const usePlatformStore = defineStore('platform', () => {
 
   function userById(id: string): User | undefined {
     return users.value.find((user) => user.id === id)
+  }
+
+  function userSettingsByUser(userId: string): UserSettings | undefined {
+    return userSettings.value.find((item) => item.userId === userId)
   }
 
   async function createSchema(input: {
@@ -224,6 +230,12 @@ export const usePlatformStore = defineStore('platform', () => {
     return saved
   }
 
+  async function saveUserSettings(nextSettings: UserSettings): Promise<UserSettings> {
+    const saved = await repositories.userSettings.save(nextSettings)
+    await refresh()
+    return saved
+  }
+
   function attachmentsByObject(entityId: string, objectId: string): Attachment[] {
     return attachments.value.filter((attachment) => attachment.entityId === entityId && attachment.objectId === objectId)
   }
@@ -306,6 +318,7 @@ export const usePlatformStore = defineStore('platform', () => {
     attachments.value = db.attachments
     auditEvents.value = db.auditEvents
     settings.value = db.settings
+    userSettings.value = db.userSettings
   }
 
   return {
@@ -324,6 +337,7 @@ export const usePlatformStore = defineStore('platform', () => {
     attachments,
     auditEvents,
     settings,
+    userSettings,
     activeSchemas,
     runtimeSchemas,
     refresh,
@@ -336,6 +350,7 @@ export const usePlatformStore = defineStore('platform', () => {
     workflowByEntity,
     roleById,
     userById,
+    userSettingsByUser,
     createSchema,
     saveSchema,
     publishSchema,
@@ -357,6 +372,7 @@ export const usePlatformStore = defineStore('platform', () => {
     addAttachment,
     deleteAttachment,
     saveSettings,
+    saveUserSettings,
     attachmentsByObject,
     auditByObject,
     tasksForUser,
