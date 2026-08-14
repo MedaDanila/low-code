@@ -9,6 +9,7 @@ import UiInput from '../../shared/ui/UiInput.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTextarea from '../../shared/ui/UiTextarea.vue'
+import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { createId } from '../../shared/lib/id'
 import { usePermissions } from '../../shared/lib/usePermissions'
 import { useAuthStore } from '../../stores/auth'
@@ -26,7 +27,6 @@ import type {
 } from '../../shared/types/domain'
 
 type SelectValue = string | number | boolean | null
-type FilterFieldKind = 'date' | 'status' | 'enum' | 'boolean' | 'number' | 'text'
 
 interface SummaryPreview {
   block: DashboardSummaryBlock
@@ -216,7 +216,7 @@ function fieldByCode(entityId: string, fieldCode: string): EntityField | undefin
   return schemaById(entityId)?.fields.find((field) => field.code === fieldCode)
 }
 
-function filterFieldKind(block: DashboardSummaryBlock, fieldCode: string): FilterFieldKind {
+function filterFieldKind(block: DashboardSummaryBlock, fieldCode: string): DashboardFilterFieldKind {
   if (fieldCode === '__createdAt' || fieldCode === '__updatedAt') return 'date'
   if (fieldCode === '__status') return 'status'
 
@@ -555,44 +555,10 @@ function calculateSummaryValue(block: DashboardSummaryBlock): string {
 
 function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
   return platform.objectsByEntity(block.entityId).filter((object) =>
-    (block.filters ?? []).every((filter) => matchesFilter(object, filter)),
+    (block.filters ?? []).every((filter) =>
+      matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
+    ),
   )
-}
-
-function matchesFilter(object: EntityObject, filter: DashboardFilter): boolean {
-  const value = objectFilterValue(object, filter.fieldCode)
-  if (filter.operator === 'filled') return isFilled(value)
-  if (filter.operator === 'empty') return !isFilled(value)
-
-  if (filter.operator === 'today') return dateKey(value) === todayKey()
-  if (filter.operator === 'beforeToday') return Boolean(dateKey(value)) && dateKey(value) < todayKey()
-  if (filter.operator === 'afterToday') return Boolean(dateKey(value)) && dateKey(value) > todayKey()
-
-  if (filter.operator === 'before' || filter.operator === 'after') {
-    const currentDate = dateKey(value)
-    const targetDate = dateKey(filter.value)
-    if (currentDate && targetDate) return filter.operator === 'before' ? currentDate < targetDate : currentDate > targetDate
-
-    const currentNumber = Number(value)
-    const targetNumber = Number(filter.value)
-    if (Number.isFinite(currentNumber) && Number.isFinite(targetNumber)) {
-      return filter.operator === 'before' ? currentNumber < targetNumber : currentNumber > targetNumber
-    }
-    return false
-  }
-
-  const current = normalizeComparable(value)
-  const target = filter.value.trim().toLowerCase()
-  if (filter.operator === 'equals') return current === target
-  if (filter.operator === 'notEquals') return current !== target
-  return current.includes(target)
-}
-
-function objectFilterValue(object: EntityObject, fieldCode: string): ObjectValue | string | undefined {
-  if (fieldCode === '__status') return object.status ?? ''
-  if (fieldCode === '__createdAt') return object.createdAt
-  if (fieldCode === '__updatedAt') return object.updatedAt
-  return object.values[fieldCode]
 }
 
 function isFilled(value: ObjectValue | string | undefined): boolean {
@@ -600,22 +566,6 @@ function isFilled(value: ObjectValue | string | undefined): boolean {
   if (Array.isArray(value)) return value.length > 0
   if (typeof value === 'string') return value.trim().length > 0
   return true
-}
-
-function normalizeComparable(value: ObjectValue | string | undefined): string {
-  if (Array.isArray(value)) return value.join(',').toLowerCase()
-  return String(value ?? '').trim().toLowerCase()
-}
-
-function dateKey(value: ObjectValue | string | undefined): string {
-  if (!isFilled(value)) return ''
-  const raw = String(value)
-  const isoLike = raw.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-  if (isoLike) return isoLike
-
-  const parsed = new Date(raw)
-  if (Number.isNaN(parsed.getTime())) return ''
-  return localDateKey(parsed)
 }
 
 function formatNumber(value: number): string {
