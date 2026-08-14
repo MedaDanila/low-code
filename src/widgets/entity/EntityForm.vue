@@ -5,8 +5,10 @@ import UiButton from '../../shared/ui/UiButton.vue'
 import UiTabs from '../../shared/ui/UiTabs.vue'
 import EntityFieldRenderer from './EntityFieldRenderer.vue'
 import GeometryEditor from '../map/GeometryEditor.vue'
-import type { DomainGeometry, EntityObject, EntityObjectValues, EntitySchema, ObjectValue } from '../../shared/types/domain'
+import type { DomainGeometry, EntityObject, EntityObjectValues, EntitySchema, MapGeometryType, ObjectValue } from '../../shared/types/domain'
 import type { EntityFormPayload } from './types'
+
+type EntityFormTab = 'main' | 'map' | 'documents'
 
 const props = withDefaults(
   defineProps<{
@@ -14,11 +16,15 @@ const props = withDefaults(
     object?: EntityObject
     saving?: boolean
     submitLabel?: string
+    cancelLabel?: string
+    initialTab?: EntityFormTab
     conflictGeometries?: DomainGeometry[]
   }>(),
   {
     saving: false,
     submitLabel: 'Сохранить',
+    cancelLabel: '',
+    initialTab: 'main',
     conflictGeometries: () => [],
   },
 )
@@ -26,18 +32,38 @@ const props = withDefaults(
 const emit = defineEmits<{
   submit: [payload: EntityFormPayload]
   validate: [payload: EntityFormPayload]
+  cancel: []
 }>()
 
-const activeTab = ref('main')
+const activeTab = ref<EntityFormTab>('main')
 const values = reactive<EntityObjectValues>({})
 const geometry = ref<DomainGeometry | undefined>()
 const errors = ref<Record<string, string>>({})
 
+const enabledGeometryTypes = computed<MapGeometryType[]>(() =>
+  props.schema.mapSettings.enabledGeometryTypes.length > 0
+    ? props.schema.mapSettings.enabledGeometryTypes
+    : props.schema.geometryType !== 'none'
+      ? [props.schema.geometryType]
+      : [],
+)
+const hasMap = computed(() => enabledGeometryTypes.value.length > 0)
 const tabs = computed(() => [
   { label: 'Основное', value: 'main' },
-  ...(props.schema.geometryType !== 'none' ? [{ label: 'Карта', value: 'map' }] : []),
+  ...(hasMap.value ? [{ label: 'Карта', value: 'map' }] : []),
   { label: 'Документы', value: 'documents' },
 ])
+const activeTabTitle = computed(() => {
+  if (activeTab.value === 'map') return 'Редактирование карты'
+  if (activeTab.value === 'documents') return 'Документы'
+  return 'Редактирование полей'
+})
+const activeTabDescription = computed(() => {
+  if (activeTab.value === 'map') return 'Геометрия объекта, определение по адресу и ручная корректировка контура.'
+  if (activeTab.value === 'documents') return 'Документы объекта будут доступны после сохранения.'
+  return 'Поля карточки объекта строятся по настройкам сущности.'
+})
+const mapEditorHeight = computed(() => activeTab.value === 'map' ? 'calc(100vh - 260px)' : '420px')
 
 const orderedFields = computed(() => [...props.schema.fields].sort((a, b) => a.order - b.order))
 const addressValue = computed(() => {
@@ -49,6 +75,13 @@ const addressValue = computed(() => {
 watch(
   () => [props.schema.id, props.object?.id],
   hydrateForm,
+  { immediate: true },
+)
+watch(
+  () => props.initialTab,
+  (tab) => {
+    activeTab.value = tab === 'map' && !hasMap.value ? 'main' : tab
+  },
   { immediate: true },
 )
 
@@ -86,6 +119,25 @@ function defaultValue(type: EntitySchema['fields'][number]['type']): ObjectValue
 
 <template>
   <form class="entity-form" @submit.prevent="validateAndSubmit">
+    <div class="entity-form__topbar">
+      <div>
+        <strong>{{ activeTabTitle }}</strong>
+        <span>{{ activeTabDescription }}</span>
+      </div>
+      <div class="entity-form__actions">
+        <UiButton
+          v-if="cancelLabel"
+          :label="cancelLabel"
+          severity="secondary"
+          variant="outlined"
+          type="button"
+          icon="pi pi-times"
+          @click="emit('cancel')"
+        />
+        <UiButton :label="submitLabel" type="submit" icon="pi pi-save" :loading="saving" />
+      </div>
+    </div>
+
     <UiTabs v-model="activeTab" :tabs="tabs" />
 
     <section v-if="activeTab === 'main'" class="form-grid">
@@ -115,20 +167,17 @@ function defaultValue(type: EntitySchema['fields'][number]['type']): ObjectValue
       <GeometryEditor
         v-model="geometry"
         :geometry-type="schema.geometryType"
+        :enabled-geometry-types="enabledGeometryTypes"
         :conflict-geometries="conflictGeometries"
         :fallback-address="addressValue"
-        height="420px"
+        :height="mapEditorHeight"
       />
     </section>
 
     <section v-else class="panel">
       <p class="muted">Документы можно добавить после сохранения объекта.</p>
     </section>
-
-    <div class="entity-form__actions">
-      <slot name="secondary" />
-      <UiButton :label="submitLabel" type="submit" icon="pi pi-save" :loading="saving" />
-    </div>
+    <slot name="secondary" />
   </form>
 </template>
 
@@ -136,6 +185,37 @@ function defaultValue(type: EntitySchema['fields'][number]['type']): ObjectValue
 .entity-form {
   display: grid;
   gap: 16px;
+}
+
+.entity-form__topbar {
+  position: sticky;
+  top: 88px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.entity-form__topbar > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.entity-form__topbar strong {
+  font-size: 14px;
+}
+
+.entity-form__topbar span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .entity-form__actions {

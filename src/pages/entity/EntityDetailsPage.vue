@@ -13,11 +13,16 @@ import GeoValidationResult from '../../widgets/geo/GeoValidationResult.vue'
 import type { DomainGeometry, EntitySchema, GeoValidationResult as GeoValidationResultType } from '../../shared/types/domain'
 import type { EntityFormPayload } from '../../widgets/entity/types'
 
+type EntityObjectTab = 'main' | 'map' | 'documents' | 'history'
+type EntityEditTab = 'main' | 'map' | 'documents'
+
 const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
 const platform = usePlatformStore()
 const editing = ref(false)
+const activeTab = ref<EntityObjectTab>('main')
+const editingTab = ref<EntityEditTab>('main')
 const saving = ref(false)
 const validationResult = ref<GeoValidationResultType | null>(null)
 const validationVisible = ref(false)
@@ -52,6 +57,15 @@ async function save(payload: EntityFormPayload) {
   }
 }
 
+function startEdit(tab: EntityObjectTab = activeTab.value): void {
+  editingTab.value = tab === 'map' ? 'map' : tab === 'documents' ? 'documents' : 'main'
+  editing.value = true
+}
+
+function cancelEdit(): void {
+  editing.value = false
+}
+
 function hasAddressChanged(
   schema: EntitySchema,
   currentValues: EntityFormPayload['values'],
@@ -72,26 +86,23 @@ async function validate(payload: EntityFormPayload) {
 </script>
 
 <template>
-  <div>
+  <div class="entity-details" :class="{ 'entity-details--map': activeTab === 'map' || (editing && editingTab === 'map') }">
     <UiEmptyState v-if="!schema || !object" title="Объект не найден" />
-    <div v-else-if="editing" class="panel">
+    <div v-else-if="editing" class="entity-details__editor">
       <EntityForm
         :schema="schema"
         :object="object"
         :saving="saving"
+        :initial-tab="editingTab"
         :conflict-geometries="conflictGeometries"
         submit-label="Сохранить изменения"
+        cancel-label="Выйти из редактирования"
         @submit="save"
         @validate="validate"
-      >
-        <template #secondary>
-          <button class="icon-button" type="button" aria-label="Закрыть форму" @click="editing = false">
-            <span>×</span>
-          </button>
-        </template>
-      </EntityForm>
+        @cancel="cancelEdit"
+      />
     </div>
-    <EntityCard v-else :schema="schema" :object="object" @edit="editing = true" />
+    <EntityCard v-else v-model:active-tab="activeTab" :schema="schema" :object="object" @edit="startEdit" />
     <UiDialog v-if="validationResult" v-model:visible="validationVisible" header="Проверка геометрии">
       <GeoValidationResult
         :result="validationResult"
@@ -101,3 +112,18 @@ async function validate(payload: EntityFormPayload) {
     </UiDialog>
   </div>
 </template>
+
+<style scoped>
+.entity-details {
+  min-height: calc(100vh - 128px);
+}
+
+.entity-details__editor {
+  display: grid;
+  gap: 16px;
+}
+
+.entity-details--map .entity-details__editor {
+  min-height: calc(100vh - 128px);
+}
+</style>

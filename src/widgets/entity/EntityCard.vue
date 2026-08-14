@@ -13,19 +13,23 @@ import MapCanvas from '../map/MapCanvas.vue'
 import EntityPropertyList from './EntityPropertyList.vue'
 import type { EntityObject, EntitySchema } from '../../shared/types/domain'
 
+type EntityCardTab = 'main' | 'map' | 'documents' | 'history'
+
 const props = defineProps<{
   schema: EntitySchema
   object: EntityObject
+  activeTab?: EntityCardTab
 }>()
 
 const emit = defineEmits<{
-  edit: []
+  'update:activeTab': [tab: EntityCardTab]
+  edit: [tab: EntityCardTab]
 }>()
 
 const toast = useToast()
 const auth = useAuthStore()
 const platform = usePlatformStore()
-const activeTab = ref('main')
+const localActiveTab = ref<EntityCardTab>('main')
 
 const tabs = [
   { label: 'Основное', value: 'main' },
@@ -33,6 +37,14 @@ const tabs = [
   { label: 'Документы', value: 'documents' },
   { label: 'История', value: 'history' },
 ]
+const currentTab = computed<EntityCardTab>({
+  get: () => props.activeTab ?? localActiveTab.value,
+  set: (tab) => {
+    localActiveTab.value = tab
+    emit('update:activeTab', tab)
+  },
+})
+const mapHeight = computed(() => currentTab.value === 'map' ? 'calc(100vh - 224px)' : '440px')
 
 const title = computed(() => {
   return String(
@@ -77,11 +89,17 @@ async function generateDocument() {
 </script>
 
 <template>
-  <div class="entity-card">
+  <div class="entity-card" :class="{ 'entity-card--map': currentTab === 'map' }">
     <div class="entity-card__main">
       <div class="entity-card__header">
         <div class="inline-actions">
-          <UiButton label="Редактировать" icon="pi pi-pencil" severity="secondary" variant="outlined" @click="emit('edit')" />
+          <UiButton
+            :label="currentTab === 'map' ? 'Редактировать карту' : 'Редактировать'"
+            icon="pi pi-pencil"
+            severity="secondary"
+            variant="outlined"
+            @click="emit('edit', currentTab)"
+          />
         </div>
       </div>
 
@@ -90,19 +108,19 @@ async function generateDocument() {
         <span>Проверьте подсвеченные поля и геометрию, затем сохраните изменения.</span>
       </div>
 
-      <UiTabs v-model="activeTab" :tabs="tabs" />
+      <UiTabs v-model="currentTab" :tabs="tabs" />
 
-      <EntityPropertyList v-if="activeTab === 'main'" :schema="schema" :object="object" />
+      <EntityPropertyList v-if="currentTab === 'main'" :schema="schema" :object="object" />
       <MapCanvas
-        v-else-if="activeTab === 'map'"
+        v-else-if="currentTab === 'map'"
         :layers="objectLayers"
         :schemas="[schema]"
         :objects="[object]"
         :visible-layer-ids="visibleLayerIds"
         :selected-object-id="object.id"
-        height="440px"
+        :height="mapHeight"
       />
-      <div v-else-if="activeTab === 'documents'" class="stack">
+      <div v-else-if="currentTab === 'documents'" class="stack">
         <div class="inline-actions">
           <UiButton label="Загрузить" icon="pi pi-upload" severity="secondary" variant="outlined" />
           <UiButton label="Сформировать документ" icon="pi pi-file-pdf" @click="generateDocument" />
@@ -141,6 +159,10 @@ async function generateDocument() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
+}
+
+.entity-card--map .entity-card__main {
+  min-height: calc(100vh - 150px);
 }
 
 .entity-card__header {
