@@ -6,6 +6,7 @@ import UiDialog from '../../shared/ui/UiDialog.vue'
 import UiTabs from '../../shared/ui/UiTabs.vue'
 import UiTable from '../../shared/ui/UiTable.vue'
 import { formatDateTime } from '../../shared/lib/format'
+import { OBJECT_STATUS_INCOMPLETE, validateEntityObjectData } from '../../shared/lib/entityObjectValidation'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import AuditTimeline from '../audit/AuditTimeline.vue'
@@ -46,6 +47,15 @@ const title = computed(() => {
 
 const objectLayers = computed(() => platform.layers.filter((layer) => layer.entityId === props.object.entityId))
 const visibleLayerIds = computed(() => objectLayers.value.map((layer) => layer.id))
+const dataIssues = computed(() =>
+  validateEntityObjectData({
+    schema: props.schema,
+    dictionaries: platform.dictionaries.filter((dictionary) => dictionary.entityId === props.schema.id),
+    values: props.object.values,
+    geometry: props.object.geometry,
+  }),
+)
+const hasIncompleteData = computed(() => props.object.status === OBJECT_STATUS_INCOMPLETE && dataIssues.value.length > 0)
 const documents = computed(() => platform.attachmentsByObject(props.schema.id, props.object.id))
 const auditEvents = computed(() => platform.auditByObject(props.schema.id, props.object.id))
 const documentRows = computed<Record<string, unknown>[]>(() =>
@@ -83,6 +93,11 @@ function showGeoConflict(result: GeoValidationResultType) {
           <UiButton label="Редактировать" icon="pi pi-pencil" severity="secondary" variant="outlined" @click="emit('edit')" />
           <UiButton label="Меню" icon="pi pi-ellipsis-v" severity="secondary" variant="outlined" />
         </div>
+      </div>
+
+      <div v-if="hasIncompleteData" class="entity-card__issues">
+        <strong>Данные неполные</strong>
+        <span>Проверьте подсвеченные поля и геометрию, затем сохраните изменения.</span>
       </div>
 
       <UiTabs v-model="activeTab" :tabs="tabs" />
@@ -156,6 +171,24 @@ function showGeoConflict(result: GeoValidationResultType) {
   display: flex;
   justify-content: space-between;
   gap: 18px;
+}
+
+.entity-card__issues {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-md);
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.entity-card__issues strong {
+  color: #78350f;
+}
+
+.entity-card__issues span {
+  font-size: 13px;
 }
 
 h2 {

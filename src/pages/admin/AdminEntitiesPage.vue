@@ -15,6 +15,7 @@ const router = useRouter()
 const toast = useToast()
 const platform = usePlatformStore()
 const openActionMenuId = ref('')
+const actionMenuStyle = ref<Record<string, string>>({})
 
 const rows = computed<Record<string, unknown>[]>(() =>
   platform.entitySchemas.map((schema) => ({
@@ -61,8 +62,15 @@ async function remove(schema: EntitySchema) {
   toast.add({ severity: 'success', summary: 'Сущность удалена', detail: schema.name, life: 2400 })
 }
 
-function toggleActionMenu(schemaId: string) {
+function toggleActionMenu(schemaId: string, event: MouseEvent) {
   openActionMenuId.value = openActionMenuId.value === schemaId ? '' : schemaId
+  if (!openActionMenuId.value) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const menuWidth = 168
+  actionMenuStyle.value = {
+    top: `${rect.bottom + 6}px`,
+    left: `${Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth))}px`,
+  }
 }
 </script>
 
@@ -101,16 +109,18 @@ function toggleActionMenu(schemaId: string) {
               class="entity-actions__trigger"
               type="button"
               aria-label="Действия"
-              @click="toggleActionMenu(String(row.id))"
+              @click="toggleActionMenu(String(row.id), $event)"
             >
               ⋯
             </button>
-            <div v-if="openActionMenuId === row.id" class="entity-actions__menu">
-              <button type="button" @click="open(row)">Открыть</button>
-              <button type="button" @click="duplicate(row.__schema as EntitySchema)">Дублировать</button>
-              <button type="button" @click="archive(row.__schema as EntitySchema)">Архивировать</button>
-              <button class="danger" type="button" @click="remove(row.__schema as EntitySchema)">Удалить</button>
-            </div>
+            <Teleport to="body">
+              <div v-if="openActionMenuId === row.id" class="entity-actions__menu" :style="actionMenuStyle">
+                <button type="button" @click="open(row)">Открыть</button>
+                <button type="button" @click="duplicate(row.__schema as EntitySchema)">Дублировать</button>
+                <button type="button" @click="archive(row.__schema as EntitySchema)">Архивировать</button>
+                <button class="danger" type="button" @click="remove(row.__schema as EntitySchema)">Удалить</button>
+              </div>
+            </Teleport>
           </div>
           <span v-else-if="column.field === 'geometryType'">{{ geometryLabels[String(row.geometryType)] ?? row.geometryType }}</span>
           <span v-else>{{ row[column.field] }}</span>
@@ -150,10 +160,8 @@ function toggleActionMenu(schemaId: string) {
 }
 
 .entity-actions__menu {
-  position: absolute;
-  top: 38px;
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 1100;
   min-width: 168px;
   padding: 6px;
   border: 1px solid var(--color-border);

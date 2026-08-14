@@ -53,10 +53,12 @@ let modify: Modify | null = null
 
 const source = new VectorSource<Feature<Geometry>>()
 const conflictSource = new VectorSource<Feature<Geometry>>()
+const territorySource = new VectorSource<Feature<Geometry>>()
 const activeTool = ref<'select' | 'draw' | 'modify'>('select')
 const buildingGeometry = ref<OverpassBuildingGeometry | null>(null)
 const buildingStatus = ref('')
 const territoryObjects = ref<OverpassTerritoryObject[]>([])
+const selectedTerritoryIds = ref<string[]>([])
 const territoryLoading = ref(false)
 const territoryError = ref('')
 let territoryAbortController: AbortController | null = null
@@ -73,6 +75,9 @@ const perimeter = computed(() => geometryLengthMeters(props.modelValue))
 const canDetermineTerritories = computed(() =>
   Boolean(props.modelValue || props.fallbackAddress.trim()) && !territoryLoading.value,
 )
+const selectedTerritoryObjects = computed(() =>
+  territoryObjects.value.filter((item) => selectedTerritoryIds.value.includes(item.id) && item.geometry),
+)
 
 onMounted(() => {
   map = new Map({
@@ -84,6 +89,18 @@ onMounted(() => {
         style: new Style({
           fill: new Fill({ color: 'rgba(217, 45, 32, 0.22)' }),
           stroke: new Stroke({ color: '#d92d20', width: 3 }),
+        }),
+      }),
+      new VectorLayer({
+        source: territorySource,
+        style: new Style({
+          image: new CircleStyle({
+            radius: 6,
+            fill: new Fill({ color: '#10b981' }),
+            stroke: new Stroke({ color: '#ffffff', width: 2 }),
+          }),
+          fill: new Fill({ color: 'rgba(16, 185, 129, 0.18)' }),
+          stroke: new Stroke({ color: '#10b981', width: 2 }),
         }),
       }),
       new VectorLayer({
@@ -120,6 +137,7 @@ onBeforeUnmount(() => {
 
 watch(() => props.modelValue, syncGeometry, { deep: true })
 watch(() => props.conflictGeometries, syncConflicts, { deep: true })
+watch(selectedTerritoryObjects, syncSelectedTerritories, { deep: true })
 
 function startDraw() {
   if (!map || !drawType.value) return
@@ -159,6 +177,7 @@ function clearGeometry() {
 function fitGeometry() {
   if (!map) return
   const features = [...source.getFeatures(), ...conflictSource.getFeatures()]
+    .concat(territorySource.getFeatures())
   if (features.length === 0) return
   const coordinates = features.flatMap((feature) => {
     const extent = feature.getGeometry()?.getExtent()
@@ -205,6 +224,7 @@ async function determineTerritories() {
 
     await determineBuildingGeometry(coordinates, territoryAbortController.signal)
     territoryObjects.value = await findTerritoryObjectsByCoordinates(coordinates, territoryAbortController.signal)
+    selectedTerritoryIds.value = []
     if (territoryObjects.value.length === 0) {
       territoryError.value = 'Overpass не нашёл объектов по этим координатам.'
     }
@@ -256,6 +276,8 @@ function resetOverpassState(): void {
   buildingGeometry.value = null
   buildingStatus.value = ''
   territoryObjects.value = []
+  selectedTerritoryIds.value = []
+  territorySource.clear()
   territoryError.value = ''
 }
 
@@ -266,6 +288,19 @@ function setCurrentGeometry(geometry: DomainGeometry | undefined): void {
     requestAnimationFrame(fitGeometry)
   }
   emit('update:modelValue', geometry)
+}
+
+function toggleTerritory(itemId: string, checked: boolean): void {
+  selectedTerritoryIds.value = checked
+    ? Array.from(new Set([...selectedTerritoryIds.value, itemId]))
+    : selectedTerritoryIds.value.filter((id) => id !== itemId)
+}
+
+function syncSelectedTerritories(): void {
+  territorySource.clear()
+  selectedTerritoryObjects.value.forEach((item) => {
+    if (item.geometry) territorySource.addFeature(domainToFeature(item.geometry))
+  })
 }
 
 function stopDraw() {
@@ -325,7 +360,12 @@ function setModifyActive(active: boolean) {
       <p v-if="buildingStatus" class="territory-panel__building">{{ buildingStatus }}</p>
       <p v-if="territoryError" class="territory-panel__error">{{ territoryError }}</p>
       <div v-if="territoryObjects.length > 0" class="territory-list">
-        <article v-for="item in territoryObjects" :key="item.id" class="territory-item">
+        <label v-for="item in territoryObjects" :key="item.id" class="territory-item">
+          <input
+            type="checkbox"
+            :checked="selectedTerritoryIds.includes(item.id)"
+            @change="toggleTerritory(item.id, ($event.target as HTMLInputElement).checked)"
+          />
           <div>
             <strong>{{ item.name }}</strong>
             <span>{{ item.category }}</span>
@@ -334,7 +374,7 @@ function setModifyActive(active: boolean) {
             {{ item.osmType }}
             <template v-if="item.distanceMeters !== null"> · {{ item.distanceMeters.toLocaleString('ru-RU') }} м</template>
           </small>
-        </article>
+        </label>
       </div>
     </section>
   </div>
@@ -441,13 +481,26 @@ function setModifyActive(active: boolean) {
 }
 
 .territory-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: 12px;
   padding: 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface-muted);
+  cursor: pointer;
+}
+
+.territory-item:has(input:checked) {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.territory-item input {
+  width: 16px;
+  height: 16px;
+  accent-color: #10b981;
 }
 
 .territory-item div {

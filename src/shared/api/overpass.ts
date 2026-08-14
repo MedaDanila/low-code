@@ -1,4 +1,5 @@
 import type { Coordinates, DomainGeometry } from '../types/domain'
+import { geometryLengthMeters, polygonAreaSqMeters } from '../lib/geometry'
 
 const OVERPASS_API_KEY = '0a3bc6e9c31eac4eb7daa0f8020ea634'
 const OVERPASS_INTERPRETER_URL = 'https://overpass-api.de/api/interpreter'
@@ -17,6 +18,7 @@ export interface OverpassTerritoryObject {
   name: string
   category: string
   distanceMeters: number | null
+  geometry?: DomainGeometry
   tags: Record<string, string>
 }
 
@@ -61,6 +63,7 @@ export async function findTerritoryObjectsByCoordinates(
   return (payload.elements ?? [])
     .map((element) => normalizeOverpassElement(element, lat, lon))
     .filter((item): item is OverpassTerritoryObject => Boolean(item))
+    .filter((item) => isUsefulTerritoryCandidate(item))
     .sort((left, right) => {
       if (left.distanceMeters === null && right.distanceMeters === null) return left.name.localeCompare(right.name, 'ru')
       if (left.distanceMeters === null) return -1
@@ -117,14 +120,12 @@ function createTerritoryQuery(lat: number, lon: number): string {
 [out:json][timeout:25];
 is_in(${lat},${lon})->.inside;
 (
-  area.inside[boundary=administrative];
-  area.inside[place];
   area.inside[landuse];
-  node(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name];
-  way(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name];
-  relation(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name];
+  node(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name][!"boundary"];
+  way(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name][!"boundary"];
+  relation(around:${OVERPASS_RADIUS_METERS},${lat},${lon})[name][!"boundary"];
 );
-out tags center ${OVERPASS_RESULT_LIMIT};
+out body geom ${OVERPASS_RESULT_LIMIT};
   `.trim()
 }
 
@@ -153,6 +154,7 @@ function normalizeOverpassElement(
   const distanceMeters = Number.isFinite(lat) && Number.isFinite(lon)
     ? haversineMeters(sourceLat, sourceLon, Number(lat), Number(lon))
     : null
+  const geometry = extractTerritoryGeometry(element)
 
   return {
     id: `${element.type}_${element.id}`,
@@ -160,8 +162,35 @@ function normalizeOverpassElement(
     name,
     category: categoryLabel(tags),
     distanceMeters,
+    geometry,
     tags,
   }
+}
+
+function extractTerritoryGeometry(element: OverpassElement): DomainGeometry | undefined {
+  if (Number.isFinite(element.lon) && Number.isFinite(element.lat)) {
+    return { type: 'Point', coordinates: [Number(element.lon), Number(element.lat)] }
+  }
+
+  const ring = normalizeRing(element.geometry)
+  if (ring) {
+    return { type: 'Polygon', coordinates: [ring] }
+  }
+
+  const line = normalizeLine(element.geometry)
+  if (line) {
+    return { type: 'LineString', coordinates: line }
+  }
+
+  const memberRing = (element.members ?? [])
+    .filter((member) => !member.role || member.role === 'outer')
+    .map((member) => normalizeRing(member.geometry))
+    .find((memberGeometry): memberGeometry is Coordinates[] => Boolean(memberGeometry))
+  if (memberRing) {
+    return { type: 'Polygon', coordinates: [memberRing] }
+  }
+
+  return undefined
 }
 
 function normalizeBuildingElement(
@@ -218,6 +247,24 @@ function normalizeRing(points?: OverpassCoordinate[]): Coordinates[] | null {
     ring.push([first[0], first[1]])
   }
   return ring
+}
+
+function normalizeLine(points?: OverpassCoordinate[]): Coordinates[] | null {
+  const line = (points ?? [])
+    .map((point) => [Number(point.lon), Number(point.lat)] as Coordinates)
+    .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat))
+  return line.length >= 2 ? line : null
+}
+
+function isUsefulTerritoryCandidate(item: OverpassTerritoryObject): boolean {
+  if (!item.geometry) return false
+  const tags = item.tags
+  const adminLevel = Number(tags.admin_level)
+  if (tags.boundary === 'administrative' || Number.isFinite(adminLevel)) return false
+  if (['country', 'state', 'region', 'province', 'district', 'county', 'municipality', 'city', 'town', 'village'].includes(tags.place ?? '')) return false
+  if (item.geometry.type === 'Polygon' && polygonAreaSqMeters(item.geometry) > 1_500_000) return false
+  if (item.geometry.type === 'LineString' && geometryLengthMeters(item.geometry) > 5_000) return false
+  return true
 }
 
 function ringCenter(ring: Coordinates[]): Coordinates {

@@ -6,10 +6,12 @@ const props = defineProps<{
 }>()
 
 const labels: Record<string, string> = {
+  published: 'Опубликовано',
+  incomplete: 'Данные неполные',
   draft: 'Черновик',
   review: 'На проверке',
   approval: 'Согласование',
-  active: 'В работе',
+  active: 'Опубликовано',
   closed: 'Закрыт',
   archived: 'Архив',
   done: 'Выполнено',
@@ -18,6 +20,8 @@ const labels: Record<string, string> = {
 }
 
 const tones: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
+  published: 'success',
+  incomplete: 'warning',
   draft: 'neutral',
   review: 'info',
   approval: 'warning',
