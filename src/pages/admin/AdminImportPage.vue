@@ -8,7 +8,7 @@ import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTabs from '../../shared/ui/UiTabs.vue'
 import UiTable from '../../shared/ui/UiTable.vue'
 import { geocodeAddress, type DadataAddressSuggestion } from '../../shared/api/dadata'
-import { findBuildingGeometryByCoordinates } from '../../shared/api/overpass'
+import { findBuildingGeometryByCoordinates } from '../../shared/api/nominatim'
 import { readSpreadsheetTableFile, type ImportedSpreadsheetTable } from '../../shared/lib/dictionaryImport'
 import {
   OBJECT_STATUS_INCOMPLETE,
@@ -257,7 +257,7 @@ async function resolveAddressGeometry(
   if (building.error) {
     return {
       geometry: { type: 'Point', coordinates },
-      status: 'Overpass недоступен, сохранена точка адреса',
+      status: 'Nominatim недоступен, сохранена точка адреса',
     }
   }
 

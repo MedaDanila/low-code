@@ -1,5 +1,5 @@
 import { geocodeAddress } from '../api/dadata'
-import { findBuildingGeometryByCoordinates } from '../api/overpass'
+import { findBuildingGeometryByCoordinates } from '../api/nominatim'
 import type { Coordinates, DomainGeometry, EntityObjectValues, EntitySchema } from '../types/domain'
 import { validateAddressCompleteness } from './entityObjectValidation'
 
@@ -53,7 +53,7 @@ export async function resolveAddressGeometryForValues(
     return {
       values: normalizedValues,
       geometry: { type: 'Point', coordinates },
-      status: 'Overpass недоступен, сохранена точка адреса',
+      status: 'Nominatim недоступен, сохранена точка адреса',
     }
   }
 

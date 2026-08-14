@@ -16,12 +16,7 @@ import { boundingExtent } from 'ol/extent'
 import { fromLonLat } from 'ol/proj'
 import type Geometry from 'ol/geom/Geometry'
 import { geocodeAddress } from '../../shared/api/dadata'
-import {
-  findBuildingGeometryByCoordinates,
-  findTerritoryObjectsByCoordinates,
-  type OverpassBuildingGeometry,
-  type OverpassTerritoryObject,
-} from '../../shared/api/overpass'
+import { findBuildingGeometryByCoordinates } from '../../shared/api/nominatim'
 import { MAP_CONFIG } from '../../shared/config/map'
 import { geometryCenter, geometryLengthMeters, polygonAreaSqMeters } from '../../shared/lib/geometry'
 import type { Coordinates, DomainGeometry, GeometryType } from '../../shared/types/domain'
@@ -53,15 +48,11 @@ let modify: Modify | null = null
 
 const source = new VectorSource<Feature<Geometry>>()
 const conflictSource = new VectorSource<Feature<Geometry>>()
-const territorySource = new VectorSource<Feature<Geometry>>()
 const activeTool = ref<'select' | 'draw' | 'modify'>('select')
-const buildingGeometry = ref<OverpassBuildingGeometry | null>(null)
 const buildingStatus = ref('')
-const territoryObjects = ref<OverpassTerritoryObject[]>([])
-const selectedTerritoryIds = ref<string[]>([])
-const territoryLoading = ref(false)
-const territoryError = ref('')
-let territoryAbortController: AbortController | null = null
+const geometryLoading = ref(false)
+const geometryError = ref('')
+let geometryAbortController: AbortController | null = null
 
 const drawType = computed(() => {
   if (props.geometryType === 'point') return 'Point'
@@ -72,11 +63,8 @@ const drawType = computed(() => {
 
 const area = computed(() => polygonAreaSqMeters(props.modelValue))
 const perimeter = computed(() => geometryLengthMeters(props.modelValue))
-const canDetermineTerritories = computed(() =>
-  Boolean(props.modelValue || props.fallbackAddress.trim()) && !territoryLoading.value,
-)
-const selectedTerritoryObjects = computed(() =>
-  territoryObjects.value.filter((item) => selectedTerritoryIds.value.includes(item.id) && item.geometry),
+const canDetermineGeometry = computed(() =>
+  Boolean(props.modelValue || props.fallbackAddress.trim()) && !geometryLoading.value,
 )
 
 onMounted(() => {
@@ -89,18 +77,6 @@ onMounted(() => {
         style: new Style({
           fill: new Fill({ color: 'rgba(217, 45, 32, 0.22)' }),
           stroke: new Stroke({ color: '#d92d20', width: 3 }),
-        }),
-      }),
-      new VectorLayer({
-        source: territorySource,
-        style: new Style({
-          image: new CircleStyle({
-            radius: 6,
-            fill: new Fill({ color: '#10b981' }),
-            stroke: new Stroke({ color: '#ffffff', width: 2 }),
-          }),
-          fill: new Fill({ color: 'rgba(16, 185, 129, 0.18)' }),
-          stroke: new Stroke({ color: '#10b981', width: 2 }),
         }),
       }),
       new VectorLayer({
@@ -130,19 +106,18 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  territoryAbortController?.abort()
+  geometryAbortController?.abort()
   map?.setTarget(undefined)
   map = null
 })
 
 watch(() => props.modelValue, syncGeometry, { deep: true })
 watch(() => props.conflictGeometries, syncConflicts, { deep: true })
-watch(selectedTerritoryObjects, syncSelectedTerritories, { deep: true })
 
 function startDraw() {
   if (!map || !drawType.value) return
   stopDraw()
-  resetOverpassState()
+  resetLookupState()
   activeTool.value = 'draw'
   setModifyActive(false)
   draw = new Draw({ source, type: drawType.value })
@@ -158,7 +133,6 @@ function startDraw() {
 function startModify() {
   activeTool.value = 'modify'
   buildingStatus.value = ''
-  buildingGeometry.value = null
   stopDraw()
   setModifyActive(true)
 }
@@ -170,14 +144,13 @@ function selectTool() {
 }
 
 function clearGeometry() {
-  resetOverpassState()
+  resetLookupState()
   setCurrentGeometry(undefined)
 }
 
 function fitGeometry() {
   if (!map) return
   const features = [...source.getFeatures(), ...conflictSource.getFeatures()]
-    .concat(territorySource.getFeatures())
   if (features.length === 0) return
   const coordinates = features.flatMap((feature) => {
     const extent = feature.getGeometry()?.getExtent()
@@ -205,41 +178,35 @@ function emitCurrentGeometry() {
 
 function emitGeometry(feature?: Feature<Geometry>) {
   buildingStatus.value = ''
-  buildingGeometry.value = null
+  geometryError.value = ''
   emit('update:modelValue', olToDomainGeometry(feature?.getGeometry()))
 }
 
-async function determineTerritories() {
-  resetOverpassState()
-  territoryAbortController?.abort()
-  territoryAbortController = new AbortController()
-  territoryLoading.value = true
+async function determineAddressGeometry() {
+  resetLookupState()
+  geometryAbortController?.abort()
+  geometryAbortController = new AbortController()
+  geometryLoading.value = true
 
   try {
-    const coordinates = await resolveCoordinates(territoryAbortController.signal)
+    const coordinates = await resolveCoordinates(geometryAbortController.signal)
     if (!coordinates) {
-      territoryError.value = 'Нужны координаты адреса. Укажите адрес или поставьте точку на карте.'
+      geometryError.value = 'Нужны координаты адреса. Укажите адрес или поставьте точку на карте.'
       return
     }
 
-    await determineBuildingGeometry(coordinates, territoryAbortController.signal)
-    territoryObjects.value = await findTerritoryObjectsByCoordinates(coordinates, territoryAbortController.signal)
-    selectedTerritoryIds.value = []
-    if (territoryObjects.value.length === 0) {
-      territoryError.value = 'Overpass не нашёл объектов по этим координатам.'
-    }
+    await determineBuildingGeometry(coordinates, geometryAbortController.signal)
   } catch (cause) {
     if ((cause as DOMException).name === 'AbortError') return
-    territoryError.value = cause instanceof Error ? cause.message : 'Не удалось определить территории'
+    geometryError.value = cause instanceof Error ? cause.message : 'Не удалось определить геометрию'
   } finally {
-    territoryLoading.value = false
+    geometryLoading.value = false
   }
 }
 
 async function determineBuildingGeometry(coordinates: Coordinates, signal: AbortSignal): Promise<void> {
   try {
     const building = await findBuildingGeometryByCoordinates(coordinates, signal)
-    buildingGeometry.value = building
     if (!building) {
       buildingStatus.value = 'Здание рядом с адресом не найдено, сохранена точка адреса.'
       return
@@ -249,7 +216,7 @@ async function determineBuildingGeometry(coordinates: Coordinates, signal: Abort
     setCurrentGeometry(building.geometry)
   } catch (cause) {
     if ((cause as DOMException).name === 'AbortError') throw cause
-    buildingStatus.value = 'Не удалось получить контур здания, сохранена точка адреса.'
+    buildingStatus.value = 'Nominatim недоступен, сохранена точка адреса.'
   }
 }
 
@@ -272,13 +239,9 @@ async function resolveCoordinates(signal: AbortSignal): Promise<Coordinates | nu
   return props.modelValue ? geometryCenter(props.modelValue) : null
 }
 
-function resetOverpassState(): void {
-  buildingGeometry.value = null
+function resetLookupState(): void {
   buildingStatus.value = ''
-  territoryObjects.value = []
-  selectedTerritoryIds.value = []
-  territorySource.clear()
-  territoryError.value = ''
+  geometryError.value = ''
 }
 
 function setCurrentGeometry(geometry: DomainGeometry | undefined): void {
@@ -288,19 +251,6 @@ function setCurrentGeometry(geometry: DomainGeometry | undefined): void {
     requestAnimationFrame(fitGeometry)
   }
   emit('update:modelValue', geometry)
-}
-
-function toggleTerritory(itemId: string, checked: boolean): void {
-  selectedTerritoryIds.value = checked
-    ? Array.from(new Set([...selectedTerritoryIds.value, itemId]))
-    : selectedTerritoryIds.value.filter((id) => id !== itemId)
-}
-
-function syncSelectedTerritories(): void {
-  territorySource.clear()
-  selectedTerritoryObjects.value.forEach((item) => {
-    if (item.geometry) territorySource.addFeature(domainToFeature(item.geometry))
-  })
 }
 
 function stopDraw() {
@@ -340,11 +290,11 @@ function setModifyActive(active: boolean) {
         v-if="geometryType !== 'none'"
         type="button"
         class="primary"
-        :disabled="!canDetermineTerritories"
-        @click="determineTerritories"
+        :disabled="!canDetermineGeometry"
+        @click="determineAddressGeometry"
       >
         <LocateFixed :size="15" />
-        {{ territoryLoading ? 'Определяем...' : 'Определить территории' }}
+        {{ geometryLoading ? 'Определяем...' : 'Определить геометрию' }}
       </button>
     </div>
     <div ref="mapEl" class="geometry-editor__map" :style="{ height }" />
@@ -352,30 +302,10 @@ function setModifyActive(active: boolean) {
       <span>Площадь: {{ Math.round(area).toLocaleString('ru-RU') }} м²</span>
       <span>Периметр: {{ Math.round(perimeter).toLocaleString('ru-RU') }} м</span>
     </div>
-    <section v-if="buildingStatus || territoryObjects.length > 0 || territoryError" class="territory-panel">
-      <div class="territory-panel__head">
-        <strong>Геометрия и территории по адресу</strong>
-        <span v-if="territoryObjects.length">{{ territoryObjects.length }}</span>
-      </div>
-      <p v-if="buildingStatus" class="territory-panel__building">{{ buildingStatus }}</p>
-      <p v-if="territoryError" class="territory-panel__error">{{ territoryError }}</p>
-      <div v-if="territoryObjects.length > 0" class="territory-list">
-        <label v-for="item in territoryObjects" :key="item.id" class="territory-item">
-          <input
-            type="checkbox"
-            :checked="selectedTerritoryIds.includes(item.id)"
-            @change="toggleTerritory(item.id, ($event.target as HTMLInputElement).checked)"
-          />
-          <div>
-            <strong>{{ item.name }}</strong>
-            <span>{{ item.category }}</span>
-          </div>
-          <small>
-            {{ item.osmType }}
-            <template v-if="item.distanceMeters !== null"> · {{ item.distanceMeters.toLocaleString('ru-RU') }} м</template>
-          </small>
-        </label>
-      </div>
+    <section v-if="buildingStatus || geometryError" class="geometry-lookup-panel">
+      <strong>Геометрия по адресу</strong>
+      <p v-if="buildingStatus" class="geometry-lookup-panel__status">{{ buildingStatus }}</p>
+      <p v-if="geometryError" class="geometry-lookup-panel__error">{{ geometryError }}</p>
     </section>
   </div>
 </template>
@@ -439,7 +369,7 @@ function setModifyActive(active: boolean) {
   font-size: 12px;
 }
 
-.territory-panel {
+.geometry-lookup-panel {
   display: grid;
   gap: 10px;
   padding: 12px;
@@ -448,69 +378,13 @@ function setModifyActive(active: boolean) {
   background: var(--color-surface);
 }
 
-.territory-panel__head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.territory-panel__head span {
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.territory-panel__error {
+.geometry-lookup-panel__error {
   margin: 0;
   color: var(--color-danger);
 }
 
-.territory-panel__building {
+.geometry-lookup-panel__status {
   margin: 0;
   color: var(--color-text-secondary);
-}
-
-.territory-list {
-  display: grid;
-  gap: 8px;
-  max-height: 260px;
-  overflow: auto;
-}
-
-.territory-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
-  cursor: pointer;
-}
-
-.territory-item:has(input:checked) {
-  border-color: #86efac;
-  background: #f0fdf4;
-}
-
-.territory-item input {
-  width: 16px;
-  height: 16px;
-  accent-color: #10b981;
-}
-
-.territory-item div {
-  display: grid;
-  gap: 3px;
-}
-
-.territory-item span,
-.territory-item small {
-  color: var(--color-text-secondary);
-  font-size: 12px;
 }
 </style>
