@@ -7,7 +7,7 @@ const props = defineProps<{
 
 const labels: Record<string, string> = {
   published: 'Опубликовано',
-  incomplete: 'Данные неполные',
+  incomplete: 'Черновик',
   draft: 'Черновик',
   review: 'На проверке',
   approval: 'Согласование',
@@ -22,7 +22,7 @@ const labels: Record<string, string> = {
 const tones: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
   published: 'success',
   incomplete: 'warning',
-  draft: 'neutral',
+  draft: 'warning',
   review: 'info',
   approval: 'warning',
   active: 'success',

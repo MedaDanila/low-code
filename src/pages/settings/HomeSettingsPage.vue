@@ -6,7 +6,6 @@ import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiInput from '../../shared/ui/UiInput.vue'
-import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTextarea from '../../shared/ui/UiTextarea.vue'
 import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
@@ -37,7 +36,6 @@ interface SummaryPreview {
 
 interface SummaryPreviewGroup {
   schema: EntitySchema
-  objectCount: number
   blocks: SummaryPreview[]
 }
 
@@ -101,7 +99,6 @@ const previewGroups = computed<SummaryPreviewGroup[]>(() => {
     if (!groups.has(schema.id)) {
       groups.set(schema.id, {
         schema,
-        objectCount: platform.objectsByEntity(schema.id).length,
         blocks: [],
       })
     }
@@ -597,23 +594,17 @@ async function save(): Promise<void> {
 
 <template>
   <div>
-    <UiPageHeader
-      eyebrow="Приложение"
-      title="Главная"
-      :description="platform.settings?.municipalityName ?? 'Нижний Новгород'"
-    >
-      <template #actions>
-        <UiButton
-          label="Добавить блок"
-          icon="pi pi-plus"
-          severity="secondary"
-          variant="outlined"
-          :disabled="availableSchemas.length === 0"
-          @click="addBlock"
-        />
-        <UiButton label="Сохранить" icon="pi pi-save" :loading="saving" @click="save" />
-      </template>
-    </UiPageHeader>
+    <div class="home-settings-actions">
+      <UiButton
+        label="Добавить блок"
+        icon="pi pi-plus"
+        severity="secondary"
+        variant="outlined"
+        :disabled="availableSchemas.length === 0"
+        @click="addBlock"
+      />
+      <UiButton label="Сохранить" icon="pi pi-save" :loading="saving" @click="save" />
+    </div>
 
     <div class="home-settings-layout">
       <section class="home-preview-surface">
@@ -637,7 +628,6 @@ async function save(): Promise<void> {
           <section v-for="group in previewGroups" :key="group.schema.id" class="summary-entity-section">
             <div class="summary-entity-section__header">
               <h3>{{ group.schema.name }}</h3>
-              <span>{{ group.objectCount }} объектов</span>
             </div>
 
             <div class="summary-grid">
@@ -787,6 +777,13 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
+.home-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
 .home-settings-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;

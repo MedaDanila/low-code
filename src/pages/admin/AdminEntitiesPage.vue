@@ -98,7 +98,7 @@ function toggleActionMenu(schemaId: string, event: MouseEvent) {
           { field: 'fields', header: 'Количество полей' },
           { field: 'createdAt', header: 'Создана' },
           { field: 'status', header: 'Статус' },
-          { field: 'actions', header: '', width: '64px' },
+          { field: 'actions', header: '', sortable: false, width: '64px' },
         ]"
         @row-click="open"
       >

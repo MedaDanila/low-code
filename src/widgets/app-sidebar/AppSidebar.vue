@@ -65,6 +65,12 @@ const runtimeEntityItems = computed(() =>
 
 <template>
   <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
+    <div class="sidebar__brand">
+      <p v-if="!collapsed" class="sidebar__eyebrow">{{ platform.settings?.platformName ?? 'Муниципальная платформа' }}</p>
+      <h1 v-if="!collapsed">{{ platform.settings?.municipalityName ?? 'Муниципалитет' }}</h1>
+      <span v-else aria-hidden="true">М</span>
+    </div>
+
     <button
       class="sidebar__collapse"
       type="button"

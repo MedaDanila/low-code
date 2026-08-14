@@ -13,7 +13,25 @@ const platform = usePlatformStore()
 const sidebarCollapsed = ref(false)
 
 const mode = computed(() => (route.path.startsWith('/admin') ? 'settings' : 'runtime'))
-const title = computed(() => platform.settings?.platformName ?? 'Муниципальная платформа')
+const currentEntity = computed(() => {
+  if (typeof route.params.entityCode === 'string') {
+    return platform.schemaByCode(route.params.entityCode)
+  }
+
+  if (route.name === 'admin-entity-builder' && typeof route.params.id === 'string') {
+    return platform.schemaById(route.params.id)
+  }
+
+  return undefined
+})
+const topbarTitle = computed(() => {
+  if (currentEntity.value) return currentEntity.value.name
+  if (route.name === 'dashboard' || route.name === 'settings-home') return 'Главная'
+  if (route.name === 'global-map') return 'Карта'
+
+  return platform.settings?.municipalityName ?? 'Муниципалитет'
+})
+const topbarDescription = computed(() => currentEntity.value?.description ?? '')
 
 function logout() {
   auth.logout()
@@ -26,9 +44,9 @@ function logout() {
     <AppSidebar v-model:collapsed="sidebarCollapsed" :mode="mode" />
     <div class="app-main">
       <header class="topbar">
-        <div>
-          <p class="topbar__eyebrow">{{ title }}</p>
-          <h1>{{ platform.settings?.municipalityName ?? 'Нижний Новгород' }}</h1>
+        <div class="topbar__heading">
+          <h1>{{ topbarTitle }}</h1>
+          <p v-if="topbarDescription" class="topbar__description">{{ topbarDescription }}</p>
         </div>
         <div class="topbar__actions">
           <button class="icon-button" type="button" aria-label="Выйти" @click="logout">
@@ -36,7 +54,7 @@ function logout() {
           </button>
         </div>
       </header>
-      <main class="content-surface">
+      <main class="content-surface" :class="{ 'content-surface--map': route.name === 'global-map' }">
         <RouterView />
       </main>
     </div>

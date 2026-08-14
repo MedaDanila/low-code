@@ -4,7 +4,6 @@ import { useToast } from 'primevue/usetoast'
 import { useRoute } from 'vue-router'
 import UiDialog from '../../shared/ui/UiDialog.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
-import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import { resolveAddressGeometryForValues } from '../../shared/lib/addressGeometry'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
@@ -74,7 +73,6 @@ async function validate(payload: EntityFormPayload) {
 
 <template>
   <div>
-    <UiPageHeader v-if="schema && object" :title="schema.name" description="Карточка строится динамически по схеме сущности." />
     <UiEmptyState v-if="!schema || !object" title="Объект не найден" />
     <div v-else-if="editing" class="panel">
       <EntityForm

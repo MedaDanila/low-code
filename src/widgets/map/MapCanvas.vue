@@ -11,6 +11,7 @@ import View from 'ol/View'
 import { Fill, Stroke, Style, Text } from 'ol/style'
 import CircleStyle from 'ol/style/Circle'
 import { fromLonLat } from 'ol/proj'
+import { boundingExtent } from 'ol/extent'
 import type { FeatureLike } from 'ol/Feature'
 import type Geometry from 'ol/geom/Geometry'
 import { MAP_CONFIG } from '../../shared/config/map'
@@ -87,6 +88,8 @@ function renderFeatures() {
   source.clear()
   clusterRawSource.clear()
   const visible = new Set(props.visibleLayerIds)
+  let selectedFeature: Feature<Geometry> | null = null
+  let fallbackFeature: Feature<Geometry> | null = null
   props.objects.forEach((object) => {
     if (!object.geometry) return
     const layer = props.layers.find((item) => item.entityId === object.entityId)
@@ -95,11 +98,27 @@ function renderFeatures() {
     const feature = domainToFeature(object.geometry)
     feature.set('objectId', object.id)
     feature.set('layerId', layer.id)
+    fallbackFeature ??= feature
+    if (object.id === props.selectedObjectId) selectedFeature = feature
     if (schema?.mapSettings.clusteringEnabled && object.geometry.type === 'Point') {
       clusterRawSource.addFeature(feature)
     } else {
       source.addFeature(feature)
     }
+  })
+  const targetFeature = selectedFeature ?? (props.objects.length === 1 ? fallbackFeature : null)
+  if (targetFeature) requestAnimationFrame(() => fitFeature(targetFeature))
+}
+
+function fitFeature(feature: Feature<Geometry>): void {
+  if (!map) return
+  const extent = feature.getGeometry()?.getExtent()
+  if (!extent) return
+  map.updateSize()
+  map.getView().fit(boundingExtent([[extent[0], extent[1]], [extent[2], extent[3]]]), {
+    padding: [56, 56, 56, 56],
+    maxZoom: 17,
+    duration: 220,
   })
 }
 

@@ -1,9 +1,9 @@
 import type { Dictionary, DomainGeometry, EntityObjectValues, EntitySchema, MapGeometryType, ObjectValue } from '../types/domain'
 
 export const OBJECT_STATUS_PUBLISHED = 'published'
-export const OBJECT_STATUS_INCOMPLETE = 'incomplete'
+export const OBJECT_STATUS_DRAFT = 'draft'
 
-export type ObjectDataStatus = typeof OBJECT_STATUS_PUBLISHED | typeof OBJECT_STATUS_INCOMPLETE
+export type ObjectDataStatus = typeof OBJECT_STATUS_PUBLISHED | typeof OBJECT_STATUS_DRAFT
 
 export interface EntityObjectDataValidationIssue {
   fieldCode?: string
@@ -16,6 +16,14 @@ interface EntityObjectDataValidationInput {
   values: EntityObjectValues
   geometry?: DomainGeometry
 }
+
+const ADDRESS_LOCALITY_PATTERN = /(?:^|[\s,])(?:г|город|с|село|деревня|п|пос|поселок|посёлок|рп|рабочий поселок|рабочий посёлок)\.?\s+[а-яa-z0-9-]+/i
+const ADDRESS_VILLAGE_SHORT_PATTERN = /(?:^|[\s,])д\.?\s+(?![0-9])[а-яa-z0-9-]+/i
+const ADDRESS_STREET_PART_PATTERN = /(?:^|[\s,])(?:ул|улица|пр-кт|просп|проспект|пр-т|пер|переулок|ш|шоссе|тракт|дорога|проезд|пр-д|б-р|бульвар|пл|площадь|наб|набережная|аллея|линия|тупик|микрорайон|мкр|квартал)\.?\s+[а-яa-z0-9-]+/i
+const ADDRESS_STREET_PART_SUFFIX_PATTERN = /(?:^|[\s,])[а-яa-z0-9-]+(?:\s+[а-яa-z0-9-]+){0,3}\s+(?:улица|проспект|переулок|шоссе|тракт|дорога|проезд|бульвар|площадь|набережная|аллея|линия|тупик|микрорайон|квартал)(?:[\s,]|$)/i
+const ADDRESS_HOUSE_PATTERN = /(?:^|[\s,])(?:д|дом|вл|владение|стр|строение|корп|корпус)\.?\s*[0-9]+[а-яa-z0-9/-]*/i
+const ADDRESS_HOUSE_AFTER_STREET_PATTERN = /(?:ул|улица|пр-кт|просп|проспект|пр-т|пер|переулок|ш|шоссе|тракт|дорога|проезд|пр-д|б-р|бульвар|пл|площадь|наб|набережная|аллея|линия|тупик|микрорайон|мкр|квартал)\.?\s+[^,]+,\s*[0-9]+[а-яa-z0-9/-]*/i
+const ADDRESS_HOUSE_AFTER_STREET_SUFFIX_PATTERN = /[а-яa-z0-9-]+(?:\s+[а-яa-z0-9-]+){0,3}\s+(?:улица|проспект|переулок|шоссе|тракт|дорога|проезд|бульвар|площадь|набережная|аллея|линия|тупик|микрорайон|квартал)\s*,\s*[0-9]+[а-яa-z0-9/-]*/i
 
 export function validateEntityObjectData(input: EntityObjectDataValidationInput): EntityObjectDataValidationIssue[] {
   const { schema, dictionaries = [], values, geometry } = input
@@ -65,20 +73,20 @@ export function validateEntityObjectData(input: EntityObjectDataValidationInput)
 }
 
 export function objectDataStatusFromIssues(issues: EntityObjectDataValidationIssue[]): ObjectDataStatus {
-  return issues.length === 0 ? OBJECT_STATUS_PUBLISHED : OBJECT_STATUS_INCOMPLETE
+  return issues.length === 0 ? OBJECT_STATUS_PUBLISHED : OBJECT_STATUS_DRAFT
 }
 
 export function validateAddressCompleteness(address: string): { ok: boolean; missing: string[] } {
   const normalized = normalizeAddress(address)
-  const hasLocality = /(?:^|[\s,])(?:г|город|с|село|деревня|п|поселок|посёлок|рп|рабочий поселок|рабочий посёлок)\.?\s+[а-яa-z0-9-]+/i.test(normalized)
-    || /(?:^|[\s,])д\.?\s+(?![0-9])[а-яa-z0-9-]+/i.test(normalized)
-  const hasStreet = /(?:^|[\s,])(?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|б-р|бульвар|пл|площадь|наб|набережная|проезд)\.?\s+[а-яa-z0-9-]+/i.test(normalized)
-  const hasHouse = /(?:^|[\s,])(?:д|дом|вл|владение)\.?\s*[0-9]+[а-яa-z0-9/-]*/i.test(normalized)
-    || /(?:ул|улица|пр-кт|проспект|пер|переулок|ш|шоссе|б-р|бульвар|пл|площадь|наб|набережная|проезд)\.?\s+[^,]+,\s*[0-9]+[а-яa-z0-9/-]*/i.test(normalized)
+  const hasLocality = ADDRESS_LOCALITY_PATTERN.test(normalized) || ADDRESS_VILLAGE_SHORT_PATTERN.test(normalized)
+  const hasStreetPart = ADDRESS_STREET_PART_PATTERN.test(normalized) || ADDRESS_STREET_PART_SUFFIX_PATTERN.test(normalized)
+  const hasHouse = ADDRESS_HOUSE_PATTERN.test(normalized)
+    || ADDRESS_HOUSE_AFTER_STREET_PATTERN.test(normalized)
+    || ADDRESS_HOUSE_AFTER_STREET_SUFFIX_PATTERN.test(normalized)
 
   const missing = [
     ...(hasLocality ? [] : ['город/село/деревня']),
-    ...(hasStreet ? [] : ['улица']),
+    ...(hasStreetPart ? [] : ['улица/проспект/шоссе']),
     ...(hasHouse ? [] : ['номер дома']),
   ]
 

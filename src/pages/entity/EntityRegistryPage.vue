@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
-import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import { usePlatformStore } from '../../stores/platform'
 import EntityRegistry from '../../widgets/entity/EntityRegistry.vue'
 
@@ -15,11 +14,6 @@ const objects = computed(() => (schema.value ? platform.objectsByEntity(schema.v
 
 <template>
   <div>
-    <UiPageHeader
-      v-if="schema"
-      :title="schema.name"
-      :description="schema.description ?? 'Автоматически созданный реестр на основе схемы сущности.'"
-    />
     <UiEmptyState v-if="!schema" title="Сущность не найдена" description="Проверьте публикацию и системный код сущности." />
     <EntityRegistry v-else :schema="schema" :objects="objects" :loading="platform.loading" />
   </div>

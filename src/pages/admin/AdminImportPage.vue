@@ -11,7 +11,7 @@ import { geocodeAddress, type DadataAddressSuggestion } from '../../shared/api/d
 import { findBuildingGeometryByCoordinates } from '../../shared/api/nominatim'
 import { readSpreadsheetTableFile, type ImportedSpreadsheetTable } from '../../shared/lib/dictionaryImport'
 import {
-  OBJECT_STATUS_INCOMPLETE,
+  OBJECT_STATUS_DRAFT,
   OBJECT_STATUS_PUBLISHED,
   objectDataStatusFromIssues,
   validateAddressCompleteness,
@@ -102,7 +102,7 @@ const hasMappedFields = computed(() =>
   importableFields(selectedSchema.value).some((field) => hasMapping(mappings.value[field.id])),
 )
 const publishedRows = computed(() => validationRows.value.filter((row) => row.status === OBJECT_STATUS_PUBLISHED))
-const incompleteRows = computed(() => validationRows.value.filter((row) => row.status === OBJECT_STATUS_INCOMPLETE))
+const draftRows = computed(() => validationRows.value.filter((row) => row.status === OBJECT_STATUS_DRAFT))
 const hasImported = computed(() => importedCount.value > 0)
 const canGoNext = computed(() => {
   if (step.value === 'entity') return Boolean(selectedSchema.value)
@@ -386,7 +386,7 @@ async function importRows(): Promise<void> {
     toast.add({
       severity: 'success',
       summary: 'Импорт завершён',
-      detail: `${publishedRows.value.length} опубликовано, ${incompleteRows.value.length} с неполными данными`,
+      detail: `${publishedRows.value.length} опубликовано, ${draftRows.value.length} черновиков с неполными данными`,
       life: 3200,
     })
   } finally {
@@ -527,7 +527,7 @@ function addUniqueError(errors: string[], message: string): void {
       <section v-else-if="step === 'validation'" class="import-section">
         <section class="metric-grid">
           <article class="metric-card"><span>Будет опубликовано</span><strong>{{ publishedRows.length }}</strong></article>
-          <article class="metric-card"><span>Данные неполные</span><strong>{{ incompleteRows.length }}</strong></article>
+          <article class="metric-card"><span>Черновики</span><strong>{{ draftRows.length }}</strong></article>
           <article v-if="hasImported" class="metric-card"><span>Импортировано</span><strong>{{ importedCount }}</strong></article>
         </section>
         <UiTable
@@ -543,7 +543,7 @@ function addUniqueError(errors: string[], message: string): void {
         >
           <template #cell="{ row, column }">
             <span v-if="column.field === 'status'" :class="row.status === OBJECT_STATUS_PUBLISHED ? 'status-ok' : 'status-warning'">
-              {{ row.status === OBJECT_STATUS_PUBLISHED ? 'Будет опубликовано' : 'Данные неполные' }}
+              {{ row.status === OBJECT_STATUS_PUBLISHED ? 'Будет опубликовано' : 'Черновик' }}
             </span>
             <span v-else-if="column.field === 'errors'">{{ (row.errors as string[]).join('; ') || 'Ошибок нет' }}</span>
             <span v-else>{{ row[column.field] }}</span>

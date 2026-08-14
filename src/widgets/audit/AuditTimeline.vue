@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import UiTabs from '../../shared/ui/UiTabs.vue'
 import { formatDateTime } from '../../shared/lib/format'
 import { usePlatformStore } from '../../stores/platform'
 import type { AuditEvent } from '../../shared/types/domain'
@@ -10,28 +8,29 @@ const props = defineProps<{
 }>()
 
 const platform = usePlatformStore()
-const filter = ref('all')
-const tabs = [
-  { label: 'Все', value: 'all' },
-  { label: 'Изменения', value: 'change' },
-  { label: 'Процесс', value: 'workflow' },
-  { label: 'Документы', value: 'document' },
-]
 
-const filteredEvents = computed(() =>
-  props.events.filter((event) => filter.value === 'all' || event.kind === filter.value),
-)
+function userName(actorId: string): string {
+  const user = platform.userById(actorId)
+  if (!user) return 'Система'
+  return [user.lastName, user.firstName, user.middleName].filter(Boolean).join(' ')
+}
+
+function eventText(event: AuditEvent): string {
+  if (event.kind === 'workflow' && event.title.startsWith('Статус:')) {
+    return event.title
+  }
+
+  return event.details ? `${event.title}. ${event.details}` : event.title
+}
 </script>
 
 <template>
   <div class="audit">
-    <UiTabs v-model="filter" :tabs="tabs" />
     <div class="audit__list">
-      <article v-for="event in filteredEvents" :key="event.id" class="audit__event">
+      <article v-for="event in events" :key="event.id" class="audit__event">
         <time>{{ formatDateTime(event.at) }}</time>
-        <strong>{{ platform.userById(event.actorId)?.lastName ?? 'Система' }}</strong>
-        <span>{{ event.title }}</span>
-        <small v-if="event.details">{{ event.details }}</small>
+        <strong>{{ userName(event.actorId) }}</strong>
+        <span>{{ eventText(event) }}</span>
       </article>
     </div>
   </div>
@@ -46,7 +45,7 @@ const filteredEvents = computed(() =>
 
 .audit__event {
   display: grid;
-  grid-template-columns: 150px 110px minmax(0, 1fr);
+  grid-template-columns: 160px 220px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   padding: 12px;
@@ -55,8 +54,7 @@ const filteredEvents = computed(() =>
   background: var(--color-surface);
 }
 
-time,
-small {
+time {
   color: var(--color-text-secondary);
 }
 </style>

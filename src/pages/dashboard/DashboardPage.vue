@@ -4,7 +4,6 @@ import { Info } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
-import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
 import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { usePermissions } from '../../shared/lib/usePermissions'
 import { useAuthStore } from '../../stores/auth'
@@ -28,7 +27,6 @@ interface SummaryView {
 
 interface SummaryGroup {
   schema: EntitySchema
-  objectCount: number
   blocks: SummaryView[]
 }
 
@@ -63,7 +61,6 @@ const summaryGroups = computed<SummaryGroup[]>(() => {
     if (!groups.has(schema.id)) {
       groups.set(schema.id, {
         schema,
-        objectCount: platform.objectsByEntity(schema.id).length,
         blocks: [],
       })
     }
@@ -292,12 +289,6 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
 
 <template>
   <div>
-    <UiPageHeader
-      eyebrow="Приложение"
-      title="Главная"
-      :description="platform.settings?.municipalityName ?? 'Нижний Новгород'"
-    />
-
     <UiEmptyState
       v-if="visibleRuntimeSchemas.length === 0"
       title="Данных пока нет"
@@ -318,7 +309,6 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
       <section v-for="group in summaryGroups" :key="group.schema.id" class="summary-entity-section">
         <div class="summary-entity-section__header">
           <h3>{{ group.schema.name }}</h3>
-          <span>{{ group.objectCount }} объектов</span>
         </div>
 
         <div class="summary-grid">
