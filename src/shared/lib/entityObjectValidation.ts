@@ -19,11 +19,12 @@ interface EntityObjectDataValidationInput {
 
 const ADDRESS_LOCALITY_PATTERN = /(?:^|[\s,])(?:г|город|с|село|деревня|п|пос|поселок|посёлок|рп|рабочий поселок|рабочий посёлок)\.?\s+[а-яa-z0-9-]+/i
 const ADDRESS_VILLAGE_SHORT_PATTERN = /(?:^|[\s,])д\.?\s+(?![0-9])[а-яa-z0-9-]+/i
-const ADDRESS_STREET_PART_PATTERN = /(?:^|[\s,])(?:ул|улица|пр-кт|просп|проспект|пр-т|пер|переулок|ш|шоссе|тракт|дорога|проезд|пр-д|б-р|бульвар|пл|площадь|наб|набережная|аллея|линия|тупик|микрорайон|мкр|квартал)\.?\s+[а-яa-z0-9-]+/i
-const ADDRESS_STREET_PART_SUFFIX_PATTERN = /(?:^|[\s,])[а-яa-z0-9-]+(?:\s+[а-яa-z0-9-]+){0,3}\s+(?:улица|проспект|переулок|шоссе|тракт|дорога|проезд|бульвар|площадь|набережная|аллея|линия|тупик|микрорайон|квартал)(?:[\s,]|$)/i
 const ADDRESS_HOUSE_PATTERN = /(?:^|[\s,])(?:д|дом|вл|владение|стр|строение|корп|корпус)\.?\s*[0-9]+[а-яa-z0-9/-]*/i
-const ADDRESS_HOUSE_AFTER_STREET_PATTERN = /(?:ул|улица|пр-кт|просп|проспект|пр-т|пер|переулок|ш|шоссе|тракт|дорога|проезд|пр-д|б-р|бульвар|пл|площадь|наб|набережная|аллея|линия|тупик|микрорайон|мкр|квартал)\.?\s+[^,]+,\s*[0-9]+[а-яa-z0-9/-]*/i
-const ADDRESS_HOUSE_AFTER_STREET_SUFFIX_PATTERN = /[а-яa-z0-9-]+(?:\s+[а-яa-z0-9-]+){0,3}\s+(?:улица|проспект|переулок|шоссе|тракт|дорога|проезд|бульвар|площадь|набережная|аллея|линия|тупик|микрорайон|квартал)\s*,\s*[0-9]+[а-яa-z0-9/-]*/i
+const ADDRESS_STREET_TYPE_PATTERN = '(?:улица|ул|проспект|пр-кт|пр-т|просп|пр|переулок|пер|шоссе|ш|тракт|тр|дорога|дор|проезд|пр-д|прзд|бульвар|б-р|бул|площадь|пл|набережная|наб|аллея|ал|линия|лин|лн|тупик|туп|микрорайон|мкр|квартал|кв-л|территория|тер|просека|просек|спуск|съезд|заезд|въезд|магистраль|кольцо)'
+const ADDRESS_STREET_PART_PATTERN = new RegExp(`(?:^|[\\s,])${ADDRESS_STREET_TYPE_PATTERN}\\.?\\s+[а-яa-z0-9-]+`, 'i')
+const ADDRESS_STREET_PART_SUFFIX_PATTERN = new RegExp(`(?:^|[\\s,])[а-яa-z0-9-]+(?:\\s+[а-яa-z0-9-]+){0,3}\\s+${ADDRESS_STREET_TYPE_PATTERN}\\.?(?:[\\s,]|$)`, 'i')
+const ADDRESS_HOUSE_AFTER_STREET_PATTERN = new RegExp(`${ADDRESS_STREET_TYPE_PATTERN}\\.?\\s+[^,]+,\\s*(?:д|дом)?\\.?\\s*[0-9]+[а-яa-z0-9/-]*`, 'i')
+const ADDRESS_HOUSE_AFTER_STREET_SUFFIX_PATTERN = new RegExp(`[а-яa-z0-9-]+(?:\\s+[а-яa-z0-9-]+){0,3}\\s+${ADDRESS_STREET_TYPE_PATTERN}\\.?,\\s*(?:д|дом)?\\.?\\s*[0-9]+[а-яa-z0-9/-]*`, 'i')
 
 export function validateEntityObjectData(input: EntityObjectDataValidationInput): EntityObjectDataValidationIssue[] {
   const { schema, dictionaries = [], values, geometry } = input
