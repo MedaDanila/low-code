@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, type Component } from 'vue'
+import { Baby, Check, ClipboardCheck, School, ToyBrick, Trees } from '@lucide/vue'
 import Checkbox from 'primevue/checkbox'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
@@ -11,7 +12,7 @@ import { usePlatformStore } from '../../stores/platform'
 import type { EntityField, EntityMapStyle, EntitySchema, FieldType, MapGeometryType } from '../../shared/types/domain'
 
 type StepId = 'purpose' | 'fields' | 'map' | 'review'
-type TemplateId = 'objects' | 'orders' | 'territories' | 'lines'
+type TemplateId = 'education' | 'playgrounds' | 'kindergartens' | 'orders' | 'public-spaces'
 
 interface StarterField {
   id: string
@@ -26,9 +27,11 @@ interface EntityTemplate {
   id: TemplateId
   title: string
   description: string
+  icon: Component
   exampleName: string
   exampleDescription: string
   geometryTypes: MapGeometryType[]
+  clusteringEnabled: boolean
   fields: Array<Omit<StarterField, 'id'>>
 }
 
@@ -44,61 +47,96 @@ const steps: Array<{ id: StepId; title: string; caption: string }> = [
 
 const templates: EntityTemplate[] = [
   {
-    id: 'objects',
-    title: 'Городские объекты',
-    description: 'Площадки, остановки, здания, элементы благоустройства.',
-    exampleName: 'Детские площадки',
-    exampleDescription: 'Паспортизация и состояние городских объектов.',
-    geometryTypes: ['point'],
+    id: 'education',
+    title: 'Учебные заведения',
+    description: 'Школы, вузы и организации среднего профессионального образования.',
+    icon: School,
+    exampleName: 'Учебные заведения',
+    exampleDescription: 'Реестр школ, вузов и организаций СПО с показателями вместимости.',
+    geometryTypes: ['point', 'polygon'],
+    clusteringEnabled: true,
     fields: [
-      starterField('Название', 'string', true),
-      starterField('Ответственный', 'string'),
-      starterField('Состояние', 'string'),
-      starterField('Комментарий', 'text', false, false),
+      starterField('Наименование', 'string', true),
+      starterField('Тип учреждения', 'string', true),
+      starterField('Количество учащихся', 'integer'),
+      starterField('Проектная мощность', 'integer'),
+      starterField('Руководитель', 'string'),
+      starterField('Телефон', 'string'),
+    ],
+  },
+  {
+    id: 'playgrounds',
+    title: 'Детские площадки',
+    description: 'Игровые зоны, оборудование, техническое состояние и балансодержатели.',
+    icon: ToyBrick,
+    exampleName: 'Детские площадки',
+    exampleDescription: 'Паспортизация детских площадок и контроль состояния оборудования.',
+    geometryTypes: ['point', 'polygon'],
+    clusteringEnabled: true,
+    fields: [
+      starterField('Наименование', 'string', true),
+      starterField('Инвентарный номер', 'string'),
+      starterField('Возрастная группа', 'string'),
+      starterField('Состояние', 'string', true),
+      starterField('Балансодержатель', 'string'),
+      starterField('Год установки', 'integer'),
+      starterField('Доступная среда', 'boolean', false, false),
+    ],
+  },
+  {
+    id: 'kindergartens',
+    title: 'Детские сады',
+    description: 'Дошкольные учреждения, количество мест, группы и контактные данные.',
+    icon: Baby,
+    exampleName: 'Детские сады',
+    exampleDescription: 'Реестр дошкольных учреждений с данными о вместимости и группах.',
+    geometryTypes: ['point', 'polygon'],
+    clusteringEnabled: true,
+    fields: [
+      starterField('Наименование', 'string', true),
+      starterField('Тип учреждения', 'string'),
+      starterField('Количество мест', 'integer'),
+      starterField('Количество групп', 'integer'),
+      starterField('Руководитель', 'string'),
+      starterField('Телефон', 'string'),
     ],
   },
   {
     id: 'orders',
-    title: 'Работы и ордера',
-    description: 'Разрешения, заявки, работы с датами начала и окончания.',
-    exampleName: 'Ордера',
-    exampleDescription: 'Разрешения на земляные и дорожные работы.',
-    geometryTypes: ['polygon'],
+    title: 'Ордера',
+    description: 'Разрешения на земляные, строительные и дорожные работы.',
+    icon: ClipboardCheck,
+    exampleName: 'Ордера на производство работ',
+    exampleDescription: 'Учёт разрешений, сроков и исполнителей земляных и дорожных работ.',
+    geometryTypes: ['polygon', 'lineString'],
+    clusteringEnabled: false,
     fields: [
-      starterField('Номер', 'string', true),
-      starterField('Исполнитель', 'string', true),
-      starterField('Начало', 'date'),
-      starterField('Окончание', 'date'),
-      starterField('Описание', 'text', false, false),
-    ],
-  },
-  {
-    id: 'territories',
-    title: 'Территории',
-    description: 'Участки, зоны ответственности, охранные и гарантийные области.',
-    exampleName: 'Гарантийные участки',
-    exampleDescription: 'Участки с действующей гарантией подрядчиков.',
-    geometryTypes: ['polygon'],
-    fields: [
-      starterField('Название', 'string', true),
-      starterField('Действует с', 'date'),
-      starterField('Действует до', 'date'),
+      starterField('Номер ордера', 'string', true),
+      starterField('Вид работ', 'string', true),
+      starterField('Заявитель', 'string'),
       starterField('Подрядчик', 'string'),
-      starterField('Комментарий', 'text', false, false),
+      starterField('Дата начала', 'date', true),
+      starterField('Дата окончания', 'date', true),
+      starterField('Описание работ', 'text', false, false),
     ],
   },
   {
-    id: 'lines',
-    title: 'Линейные объекты',
-    description: 'Маршруты, сети, участки дорог и протяжённые элементы.',
-    exampleName: 'Маршруты обслуживания',
-    exampleDescription: 'Линейные объекты для контроля работ и обслуживания.',
-    geometryTypes: ['lineString'],
+    id: 'public-spaces',
+    title: 'Общественные пространства',
+    description: 'Парки, скверы, площади, набережные и благоустроенные территории.',
+    icon: Trees,
+    exampleName: 'Общественные пространства',
+    exampleDescription: 'Реестр парков, скверов и других благоустроенных городских территорий.',
+    geometryTypes: ['polygon', 'point'],
+    clusteringEnabled: false,
     fields: [
-      starterField('Название', 'string', true),
-      starterField('Протяжённость', 'decimal'),
-      starterField('Ответственный', 'string'),
-      starterField('Комментарий', 'text', false, false),
+      starterField('Наименование', 'string', true),
+      starterField('Тип пространства', 'string', true),
+      starterField('Состояние', 'string'),
+      starterField('Площадь', 'decimal'),
+      starterField('Балансодержатель', 'string'),
+      starterField('Доступная среда', 'boolean', false, false),
+      starterField('Описание', 'text', false, false),
     ],
   },
 ]
@@ -127,11 +165,11 @@ const defaultGeometryStyles: Record<MapGeometryType, EntityMapStyle> = {
 }
 
 const activeStep = ref<StepId>('purpose')
-const selectedTemplateId = ref<TemplateId>('objects')
+const selectedTemplateId = ref<TemplateId>('education')
 const entityName = ref('')
 const entityDescription = ref('')
 const geometryTypes = ref<MapGeometryType[]>([...templates[0].geometryTypes])
-const clusteringEnabled = ref(false)
+const clusteringEnabled = ref(templates[0].clusteringEnabled)
 const starterFields = ref<StarterField[]>(cloneTemplateFields(templates[0]))
 const validationMessage = ref('')
 const creating = ref(false)
@@ -164,6 +202,7 @@ function selectTemplate(template: EntityTemplate): void {
     entityDescription.value = template.exampleDescription
   }
   geometryTypes.value = [...template.geometryTypes]
+  clusteringEnabled.value = template.clusteringEnabled
   starterFields.value = cloneTemplateFields(template)
   validationMessage.value = ''
 }
@@ -347,7 +386,7 @@ function geometryLabel(type: MapGeometryType): string {
         <section v-if="activeStep === 'purpose'" class="create-section">
           <div class="section-heading">
             <h3>Назначение сущности</h3>
-            <p>Сценарий, название и описание будущего раздела.</p>
+            <p>Выберите готовый сценарий — поля и настройки карты можно изменить на следующих шагах.</p>
           </div>
 
           <div class="template-grid">
@@ -359,8 +398,23 @@ function geometryLabel(type: MapGeometryType): string {
               :class="{ active: selectedTemplateId === template.id }"
               @click="selectTemplate(template)"
             >
-              <strong>{{ template.title }}</strong>
-              <span>{{ template.description }}</span>
+              <span class="template-card__top">
+                <span class="template-card__icon" aria-hidden="true">
+                  <component :is="template.icon" :size="20" />
+                </span>
+                <span v-if="selectedTemplateId === template.id" class="template-card__selected">
+                  <Check :size="15" />
+                  Выбрано
+                </span>
+              </span>
+              <span class="template-card__content">
+                <strong>{{ template.title }}</strong>
+                <span>{{ template.description }}</span>
+              </span>
+              <span class="template-card__meta">
+                <span>{{ template.geometryTypes.map(geometryLabel).join(' · ') }}</span>
+                <span>{{ template.fields.length + 1 }} полей</span>
+              </span>
             </button>
           </div>
 
@@ -591,7 +645,8 @@ function geometryLabel(type: MapGeometryType): string {
 }
 
 .create-main {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
   min-height: 560px;
 }
@@ -629,6 +684,10 @@ function geometryLabel(type: MapGeometryType): string {
   gap: 12px;
 }
 
+.template-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .template-card,
 .geometry-card,
 .field-item,
@@ -640,24 +699,93 @@ function geometryLabel(type: MapGeometryType): string {
 
 .template-card {
   display: grid;
-  gap: 8px;
-  min-height: 118px;
-  padding: 14px;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  min-height: 168px;
+  padding: 16px;
   color: var(--color-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-.template-card span {
+.template-card:hover {
+  border-color: #bfdbfe;
+  background: var(--color-surface-muted);
+}
+
+.template-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.template-card__top,
+.template-card__meta,
+.template-card__selected {
+  display: flex;
+  align-items: center;
+}
+
+.template-card__top {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.template-card__icon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+
+.template-card__selected {
+  gap: 5px;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.template-card__content {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.template-card__content strong {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.template-card__content > span {
   color: var(--color-text-secondary);
   line-height: 1.45;
+}
+
+.template-card__meta {
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .template-card.active,
 .geometry-card.active {
   border-color: #93c5fd;
   background: rgba(37, 99, 235, 0.08);
+}
+
+.template-card.active .template-card__icon {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 .create-form-grid {
@@ -762,8 +890,10 @@ function geometryLabel(type: MapGeometryType): string {
 
 .create-actions {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+  margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--color-border);
 }
@@ -817,6 +947,10 @@ function geometryLabel(type: MapGeometryType): string {
   .field-item__controls,
   .section-heading--inline {
     grid-template-columns: 1fr;
+  }
+
+  .template-card:last-child:nth-child(odd) {
+    grid-column: auto;
   }
 
   .review-list div,
