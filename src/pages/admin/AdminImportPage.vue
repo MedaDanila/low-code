@@ -10,11 +10,19 @@ import UiTable from '../../shared/ui/UiTable.vue'
 import { geocodeAddress, type DadataAddressSuggestion } from '../../shared/api/dadata'
 import { findBuildingGeometryByCoordinates } from '../../shared/api/overpass'
 import { readSpreadsheetTableFile, type ImportedSpreadsheetTable } from '../../shared/lib/dictionaryImport'
+import {
+  OBJECT_STATUS_INCOMPLETE,
+  OBJECT_STATUS_PUBLISHED,
+  objectDataStatusFromIssues,
+  validateAddressCompleteness,
+  validateEntityObjectData,
+  type ObjectDataStatus,
+} from '../../shared/lib/entityObjectValidation'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import type { Coordinates, DomainGeometry, EntityField, EntityObjectValues, EntitySchema, FieldType, ObjectValue } from '../../shared/types/domain'
 
-type ImportStep = 'entity' | 'upload' | 'mapping' | 'validation' | 'result'
+type ImportStep = 'entity' | 'upload' | 'mapping' | 'validation'
 type SelectValue = string | number | boolean | null
 
 interface MappingRow {
@@ -27,7 +35,7 @@ interface MappingRow {
 
 interface ValidationRow {
   rowNumber: number
-  status: 'valid' | 'invalid'
+  status: ObjectDataStatus
   preview: string
   geometryStatus: string
   errors: string[]
@@ -58,7 +66,6 @@ const importTable = ref<ImportedSpreadsheetTable | null>(null)
 const mappings = ref<Record<string, SelectValue>>({})
 const validationRows = ref<ValidationRow[]>([])
 const importedCount = ref(0)
-const skippedCount = ref(0)
 const importing = ref(false)
 const validating = ref(false)
 const geocodeCache = new Map<string, DadataAddressSuggestion | null>()
@@ -69,7 +76,6 @@ const tabs = [
   { label: '2 Загрузка', value: 'upload' },
   { label: '3 Сопоставление', value: 'mapping' },
   { label: '4 Проверка', value: 'validation' },
-  { label: '5 Результат', value: 'result' },
 ]
 const selectedSchema = computed(() => platform.schemaById(String(entityId.value)))
 const entityOptions = computed(() => platform.activeSchemas.map((schema) => ({ label: schema.name, value: schema.id })))
@@ -95,18 +101,19 @@ const requiredFieldsMapped = computed(() =>
 const hasMappedFields = computed(() =>
   importableFields(selectedSchema.value).some((field) => hasMapping(mappings.value[field.id])),
 )
-const validRows = computed(() => validationRows.value.filter((row) => row.status === 'valid'))
-const invalidRows = computed(() => validationRows.value.filter((row) => row.status === 'invalid'))
+const publishedRows = computed(() => validationRows.value.filter((row) => row.status === OBJECT_STATUS_PUBLISHED))
+const incompleteRows = computed(() => validationRows.value.filter((row) => row.status === OBJECT_STATUS_INCOMPLETE))
+const hasImported = computed(() => importedCount.value > 0)
 const canGoNext = computed(() => {
   if (step.value === 'entity') return Boolean(selectedSchema.value)
   if (step.value === 'upload') return Boolean(importTable.value && importTable.value.rows.length > 0)
   if (step.value === 'mapping') return requiredFieldsMapped.value && hasMappedFields.value
-  if (step.value === 'validation') return validationRows.value.length > 0
+  if (step.value === 'validation') return validationRows.value.length > 0 && !hasImported.value
   return false
 })
 const nextButtonLabel = computed(() => {
   if (step.value === 'mapping') return 'Проверить и определить координаты'
-  if (step.value === 'validation') return 'Добавить валидные строки'
+  if (step.value === 'validation') return hasImported.value ? 'Импортировано' : `Импортировать ${validationRows.value.length} строк`
   return 'Далее'
 })
 
@@ -180,6 +187,7 @@ async function validateImport(): Promise<void> {
       rows.push(await validateRow(schema, row.rowNumber, row.values))
     }
     validationRows.value = rows
+    importedCount.value = 0
     step.value = 'validation'
   } finally {
     validating.value = false
@@ -196,13 +204,17 @@ async function validateRow(schema: EntitySchema, rowNumber: number, rowValues: s
     if (field.required && isEmptyValue(converted)) errors.push(`Поле «${field.name}» обязательно`)
     if (!isEmptyValue(converted)) values[field.code] = converted
   })
-  const resolvedGeometry = errors.length === 0
-    ? await resolveAddressGeometry(schema, values, errors)
-    : { status: addressValue(schema, values) ? 'Геометрия не проверялась из-за ошибок строки' : 'Адрес не указан' }
-  if (Object.keys(values).length === 0) errors.push('В строке нет данных по выбранным колонкам')
+  const resolvedGeometry = await resolveAddressGeometry(schema, values, errors)
+  const validationIssues = validateEntityObjectData({
+    schema,
+    dictionaries: platform.dictionaries.filter((dictionary) => dictionary.entityId === schema.id),
+    values,
+    geometry: resolvedGeometry.geometry,
+  })
+  validationIssues.forEach((issue) => addUniqueError(errors, issue.message))
   return {
     rowNumber,
-    status: errors.length > 0 ? 'invalid' : 'valid',
+    status: objectDataStatusFromIssues(validationIssues.length > 0 || errors.length > 0 ? [{ message: 'Данные неполные' }] : []),
     preview: rowValues.filter(Boolean).slice(0, 4).join(' · ') || 'Пустая строка',
     geometryStatus: resolvedGeometry.status,
     errors,
@@ -218,6 +230,11 @@ async function resolveAddressGeometry(
 ): Promise<ResolvedImportGeometry> {
   const address = addressValue(schema, values)
   if (!address) return { status: 'Адрес не указан' }
+  const addressCheck = validateAddressCompleteness(address)
+  if (!addressCheck.ok) {
+    addUniqueError(errors, `Адрес заполнен не полностью: ${addressCheck.missing.join(', ')}`)
+    return { status: 'Адрес неполный, геометрия не искалась' }
+  }
   const suggestion = await geocodeCached(address)
   const geoLon = suggestion?.geoLon
   const geoLat = suggestion?.geoLat
@@ -343,24 +360,35 @@ function parseEnumValue(value: string, field: EntityField, errors: string[]): st
     candidate.active && (normalizeText(candidate.name) === normalized || normalizeText(candidate.code) === normalized),
   )
   if (item) return item.code
+  const looseItem = dictionary.items.find((candidate) => {
+    if (!candidate.active) return false
+    const name = normalizeText(candidate.name)
+    const code = normalizeText(candidate.code)
+    return name.includes(normalized) || normalized.includes(name) || code.includes(normalized) || normalized.includes(code)
+  })
+  if (looseItem) return looseItem.code
   errors.push(`Значение «${value}» не найдено в справочнике поля «${field.name}»`)
   return null
 }
 
-async function importValidRows(): Promise<void> {
-  if (!selectedSchema.value || !auth.currentUser || validRows.value.length === 0) return
+async function importRows(): Promise<void> {
+  if (!selectedSchema.value || !auth.currentUser || validationRows.value.length === 0 || hasImported.value) return
   importing.value = true
   try {
-    await platform.importObjects(validRows.value.map((row) => ({
+    await platform.importObjects(validationRows.value.map((row) => ({
       entityId: selectedSchema.value!.id,
       values: row.values,
       geometry: row.geometry,
+      status: row.status,
       actorId: auth.currentUser!.id,
     })))
-    importedCount.value = validRows.value.length
-    skippedCount.value = invalidRows.value.length
-    step.value = 'result'
-    toast.add({ severity: 'success', summary: 'Импорт завершён', detail: `${importedCount.value} строк добавлено`, life: 2600 })
+    importedCount.value = validationRows.value.length
+    toast.add({
+      severity: 'success',
+      summary: 'Импорт завершён',
+      detail: `${publishedRows.value.length} опубликовано, ${incompleteRows.value.length} с неполными данными`,
+      life: 3200,
+    })
   } finally {
     importing.value = false
   }
@@ -380,7 +408,7 @@ async function goNext(): Promise<void> {
     return
   }
   if (step.value === 'validation') {
-    void importValidRows()
+    void importRows()
   }
 }
 
@@ -388,7 +416,6 @@ function goBack(): void {
   if (step.value === 'upload') step.value = 'entity'
   else if (step.value === 'mapping') step.value = 'upload'
   else if (step.value === 'validation') step.value = 'mapping'
-  else if (step.value === 'result') step.value = 'validation'
 }
 
 function resetImportState(clearFile = true): void {
@@ -398,15 +425,8 @@ function resetImportState(clearFile = true): void {
   }
   validationRows.value = []
   importedCount.value = 0
-  skippedCount.value = 0
   geocodeCache.clear()
   buildingGeometryCache.clear()
-}
-
-function startAgain(): void {
-  resetImportState(true)
-  initializeMappings(selectedSchema.value)
-  step.value = 'entity'
 }
 
 function fieldTypeLabel(type: FieldType): string {
@@ -437,11 +457,15 @@ function isEmptyValue(value: ObjectValue): boolean {
 function hasMapping(value: SelectValue): boolean {
   return value !== '' && value !== null
 }
+
+function addUniqueError(errors: string[], message: string): void {
+  if (!errors.includes(message)) errors.push(message)
+}
 </script>
 
 <template>
   <div>
-    <UiPageHeader title="Импорт" description="Загрузите табличный файл, сопоставьте колонки и добавьте валидные строки в выбранную сущность." />
+    <UiPageHeader title="Импорт" description="Загрузите табличный файл, сопоставьте колонки и добавьте все строки в выбранную сущность." />
     <div class="panel stack">
       <UiTabs v-model="step" :tabs="tabs" />
 
@@ -502,8 +526,9 @@ function hasMapping(value: SelectValue): boolean {
 
       <section v-else-if="step === 'validation'" class="import-section">
         <section class="metric-grid">
-          <article class="metric-card"><span>Будет добавлено</span><strong>{{ validRows.length }}</strong></article>
-          <article class="metric-card"><span>Не добавится</span><strong>{{ invalidRows.length }}</strong></article>
+          <article class="metric-card"><span>Будет опубликовано</span><strong>{{ publishedRows.length }}</strong></article>
+          <article class="metric-card"><span>Данные неполные</span><strong>{{ incompleteRows.length }}</strong></article>
+          <article v-if="hasImported" class="metric-card"><span>Импортировано</span><strong>{{ importedCount }}</strong></article>
         </section>
         <UiTable
           :rows="validationRows as unknown as Record<string, unknown>[]"
@@ -517,8 +542,8 @@ function hasMapping(value: SelectValue): boolean {
           empty-message="Нет строк для проверки"
         >
           <template #cell="{ row, column }">
-            <span v-if="column.field === 'status'" :class="row.status === 'valid' ? 'status-ok' : 'status-error'">
-              {{ row.status === 'valid' ? 'Готово' : 'Не добавится' }}
+            <span v-if="column.field === 'status'" :class="row.status === OBJECT_STATUS_PUBLISHED ? 'status-ok' : 'status-warning'">
+              {{ row.status === OBJECT_STATUS_PUBLISHED ? 'Будет опубликовано' : 'Данные неполные' }}
             </span>
             <span v-else-if="column.field === 'errors'">{{ (row.errors as string[]).join('; ') || 'Ошибок нет' }}</span>
             <span v-else>{{ row[column.field] }}</span>
@@ -526,20 +551,11 @@ function hasMapping(value: SelectValue): boolean {
         </UiTable>
       </section>
 
-      <section v-else class="import-section">
-        <UiEmptyState
-          title="Импорт завершён"
-          :description="`${importedCount} строк добавлено, ${skippedCount} строк пропущено.`"
-        >
-          <UiButton label="Импортировать ещё" icon="pi pi-refresh" @click="startAgain" />
-        </UiEmptyState>
-      </section>
-
       <div class="inline-actions">
         <UiButton label="Назад" severity="secondary" variant="outlined" :disabled="step === 'entity' || importing || validating" @click="goBack" />
         <UiButton
           :label="nextButtonLabel"
-          :disabled="!canGoNext || importing || validating || (step === 'validation' && validRows.length === 0)"
+          :disabled="!canGoNext || importing || validating"
           :loading="importing || validating"
           @click="goNext"
         />
@@ -582,6 +598,11 @@ function hasMapping(value: SelectValue): boolean {
 .import-warning,
 .status-error {
   color: var(--color-danger);
+}
+
+.status-warning {
+  color: var(--color-warning);
+  font-weight: 650;
 }
 
 .status-ok {

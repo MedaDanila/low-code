@@ -11,10 +11,12 @@ const platform = usePlatformStore()
 const ordersSchema = computed(() => platform.schemaByCode('orders'))
 const orders = computed(() => (ordersSchema.value ? platform.objectsByEntity(ordersSchema.value.id) : []))
 const statusLabels: Record<string, string> = {
+  published: 'Опубликовано',
+  incomplete: 'Данные неполные',
   draft: 'Черновик',
   review: 'На проверке',
   approval: 'Согласование',
-  active: 'В работе',
+  active: 'Опубликовано',
   closed: 'Закрыт',
 }
 const statusBuckets = computed(() => {
@@ -47,8 +49,8 @@ const contractors = computed(() => {
     <template v-else>
     <section class="metric-grid">
       <article class="metric-card"><span>Всего</span><strong>{{ orders.length }}</strong></article>
-      <article class="metric-card"><span>Активные</span><strong>{{ orders.filter((item) => item.status === 'active').length }}</strong></article>
-      <article class="metric-card"><span>На проверке</span><strong>{{ orders.filter((item) => item.status === 'review').length }}</strong></article>
+      <article class="metric-card"><span>Опубликовано</span><strong>{{ orders.filter((item) => item.status === 'published').length }}</strong></article>
+      <article class="metric-card"><span>Данные неполные</span><strong>{{ orders.filter((item) => item.status === 'incomplete').length }}</strong></article>
       <article class="metric-card"><span>Просроченные</span><strong>0</strong></article>
     </section>
     <section class="page-grid two" style="margin-top: 18px">

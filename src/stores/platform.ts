@@ -139,6 +139,7 @@ export const usePlatformStore = defineStore('platform', () => {
     entityId: string
     values: EntityObjectValues
     geometry?: EntityObject['geometry']
+    status?: string
     actorId: string
   }): Promise<EntityObject> {
     const object = await repositories.entityObjects.create(input)
@@ -150,6 +151,7 @@ export const usePlatformStore = defineStore('platform', () => {
     entityId: string
     values: EntityObjectValues
     geometry?: EntityObject['geometry']
+    status?: string
     actorId: string
   }>): Promise<EntityObject[]> {
     const objects = await repositories.entityObjects.createMany(inputs)
@@ -166,6 +168,11 @@ export const usePlatformStore = defineStore('platform', () => {
     const object = await repositories.entityObjects.update(input)
     await refresh()
     return object
+  }
+
+  async function deleteObject(id: string): Promise<void> {
+    await repositories.entityObjects.delete(id)
+    await refresh()
   }
 
   async function validateObject(object: EntityObject): Promise<GeoValidationResult> {
@@ -376,6 +383,7 @@ export const usePlatformStore = defineStore('platform', () => {
     createObject,
     importObjects,
     updateObject,
+    deleteObject,
     validateObject,
     applyWorkflowTransition,
     saveWorkflow,

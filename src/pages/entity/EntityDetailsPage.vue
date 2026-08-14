@@ -5,12 +5,13 @@ import { useRoute } from 'vue-router'
 import UiDialog from '../../shared/ui/UiDialog.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
+import { resolveAddressGeometryForValues } from '../../shared/lib/addressGeometry'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import EntityCard from '../../widgets/entity/EntityCard.vue'
 import EntityForm from '../../widgets/entity/EntityForm.vue'
 import GeoValidationResult from '../../widgets/geo/GeoValidationResult.vue'
-import type { DomainGeometry, GeoValidationResult as GeoValidationResultType } from '../../shared/types/domain'
+import type { DomainGeometry, EntitySchema, GeoValidationResult as GeoValidationResultType } from '../../shared/types/domain'
 import type { EntityFormPayload } from '../../widgets/entity/types'
 
 const route = useRoute()
@@ -27,20 +28,39 @@ const schema = computed(() => platform.schemaByCode(String(route.params.entityCo
 const object = computed(() => platform.objectById(String(route.params.objectId)))
 
 async function save(payload: EntityFormPayload) {
-  if (!object.value || !auth.currentUser) return
+  if (!schema.value || !object.value || !auth.currentUser) return
   saving.value = true
   try {
+    const addressChanged = hasAddressChanged(schema.value, object.value.values, payload.values)
+    const resolved = addressChanged
+      ? await resolveAddressGeometryForValues(schema.value, payload.values)
+      : { values: payload.values, geometry: payload.geometry, status: '' }
     await platform.updateObject({
       id: object.value.id,
-      values: payload.values,
-      geometry: payload.geometry,
+      values: resolved.values,
+      geometry: resolved.geometry,
       actorId: auth.currentUser.id,
     })
     editing.value = false
-    toast.add({ severity: 'success', summary: 'Изменения сохранены', life: 2400 })
+    toast.add({
+      severity: 'success',
+      summary: 'Изменения сохранены',
+      detail: addressChanged ? resolved.status : undefined,
+      life: 2800,
+    })
   } finally {
     saving.value = false
   }
+}
+
+function hasAddressChanged(
+  schema: EntitySchema,
+  currentValues: EntityFormPayload['values'],
+  nextValues: EntityFormPayload['values'],
+): boolean {
+  return schema.fields
+    .filter((field) => field.type === 'address')
+    .some((field) => String(currentValues[field.code] ?? '').trim() !== String(nextValues[field.code] ?? '').trim())
 }
 
 async function validate(payload: EntityFormPayload) {

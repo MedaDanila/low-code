@@ -4,6 +4,10 @@ import {
   distanceBetweenGeometriesMeters,
   geometriesIntersect,
 } from '../lib/geometry'
+import {
+  objectDataStatusFromIssues,
+  validateEntityObjectData,
+} from '../lib/entityObjectValidation'
 import type {
   AppDatabase,
   Attachment,
@@ -74,6 +78,7 @@ export interface CreateEntityObjectInput {
   entityId: string
   values: EntityObjectValues
   geometry?: EntityObject['geometry']
+  status?: string
   actorId: string
 }
 
@@ -235,15 +240,13 @@ export const repositories = {
     },
     async create(input: CreateEntityObjectInput) {
       const db = readDb()
-      const workflow = db.workflows.find((item) => item.entityId === input.entityId && item.status === 'active')
-      const initialState = workflow?.states.find((state) => state.initial)
       const timestamp = nowIso()
       const object: EntityObject = {
         id: createId('obj'),
         entityId: input.entityId,
         values: input.values,
         geometry: input.geometry,
-        status: initialState?.code ?? 'active',
+        status: input.status ?? resolveObjectDataStatus(db, input.entityId, input.values, input.geometry),
         createdAt: timestamp,
         updatedAt: timestamp,
         createdBy: input.actorId,
@@ -267,15 +270,13 @@ export const repositories = {
       const db = readDb()
       const created: EntityObject[] = []
       inputs.forEach((input) => {
-        const workflow = db.workflows.find((item) => item.entityId === input.entityId && item.status === 'active')
-        const initialState = workflow?.states.find((state) => state.initial)
         const timestamp = nowIso()
         const object: EntityObject = {
           id: createId('obj'),
           entityId: input.entityId,
           values: input.values,
           geometry: input.geometry,
-          status: initialState?.code ?? 'active',
+          status: input.status ?? resolveObjectDataStatus(db, input.entityId, input.values, input.geometry),
           createdAt: timestamp,
           updatedAt: timestamp,
           createdBy: input.actorId,
@@ -303,6 +304,7 @@ export const repositories = {
       if (!object) throw new Error('Объект сущности не найден')
       object.values = input.values
       object.geometry = input.geometry
+      object.status = resolveObjectDataStatus(db, object.entityId, input.values, input.geometry)
       object.updatedAt = nowIso()
       object.updatedBy = input.actorId
       db.auditEvents.unshift({
@@ -320,7 +322,12 @@ export const repositories = {
     },
     async delete(id: string) {
       const db = readDb()
-      db.entityObjects = db.entityObjects.filter((object) => object.id !== id)
+      const object = db.entityObjects.find((item) => item.id === id)
+      if (!object) throw new Error('Объект сущности не найден')
+      db.entityObjects = db.entityObjects.filter((item) => item.id !== id)
+      db.tasks = db.tasks.filter((task) => task.objectId !== id)
+      db.attachments = db.attachments.filter((attachment) => attachment.objectId !== id)
+      db.auditEvents = db.auditEvents.filter((event) => event.objectId !== id)
       writeDb(db)
       await delay()
     },
@@ -728,6 +735,10 @@ function migrateDb(db: AppDatabase): AppDatabase {
   ensureSystemBootstrap(migrated)
   migrated.users.forEach((user) => ensureUserSettings(migrated, user.id))
   migrated.userSettings = migrated.userSettings.map((settings) => normalizeUserSettings(settings, migrated))
+  migrated.entityObjects = migrated.entityObjects.map((object) => ({
+    ...object,
+    status: resolveObjectDataStatus(migrated, object.entityId, object.values, object.geometry),
+  }))
   return migrated
 }
 
@@ -1086,6 +1097,22 @@ function migrateWorkflowStateCodes(
     const change = changes.find((item) => item.oldCode === object.status)
     return change ? { ...object, status: change.newCode } : object
   })
+}
+
+function resolveObjectDataStatus(
+  db: AppDatabase,
+  entityId: string,
+  values: EntityObjectValues,
+  geometry?: EntityObject['geometry'],
+): string {
+  const schema = db.entitySchemas.find((item) => item.id === entityId)
+  const issues = validateEntityObjectData({
+    schema,
+    dictionaries: db.dictionaries.filter((dictionary) => dictionary.entityId === entityId),
+    values,
+    geometry,
+  })
+  return objectDataStatusFromIssues(issues)
 }
 
 function ensureUserSettings(db: AppDatabase, userId: string): UserSettings {
