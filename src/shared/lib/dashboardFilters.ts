@@ -8,8 +8,15 @@ export function matchesDashboardFilter(
   fieldKind: DashboardFilterFieldKind,
   now = new Date(),
 ): boolean {
-  const value = objectFilterValue(object, filter.fieldCode)
+  return matchesDashboardFilterValue(objectFilterValue(object, filter.fieldCode), filter, fieldKind, now)
+}
 
+export function matchesDashboardFilterValue(
+  value: ObjectValue | string | undefined,
+  filter: DashboardFilter,
+  fieldKind: DashboardFilterFieldKind,
+  now = new Date(),
+): boolean {
   if (filter.operator === 'filled') return isFilled(value)
   if (filter.operator === 'empty') return !isFilled(value)
 

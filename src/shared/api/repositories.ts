@@ -1209,7 +1209,7 @@ function normalizeDashboardFilterGroups(groups: DashboardFilterGroup[], schema: 
 }
 
 function isValidDashboardFilterField(fieldCode: string, schema: EntitySchema | undefined): boolean {
-  if (fieldCode === '__status' || fieldCode === '__createdAt' || fieldCode === '__updatedAt') return true
+  if (fieldCode === '__status' || fieldCode === '__createdAt' || fieldCode === '__updatedAt' || fieldCode === '__summaryValue') return true
   return Boolean(schema?.fields.some((field) => field.code === fieldCode))
 }
 

@@ -8,7 +8,7 @@ import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiInput from '../../shared/ui/UiInput.vue'
 import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTextarea from '../../shared/ui/UiTextarea.vue'
-import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
+import { matchesDashboardFilter, matchesDashboardFilterValue, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { createId } from '../../shared/lib/id'
 import { usePermissions } from '../../shared/lib/usePermissions'
 import { useAuthStore } from '../../stores/auth'
@@ -47,6 +47,7 @@ const SYSTEM_FILTER_FIELDS = [
   { label: 'Дата создания', value: '__createdAt' },
   { label: 'Дата изменения', value: '__updatedAt' },
 ]
+const SUMMARY_VALUE_FIELD_CODE = '__summaryValue'
 
 const toast = useToast()
 const router = useRouter()
@@ -150,9 +151,10 @@ function metricFieldOptions(entityId: string): Array<{ label: string; value: str
   ]
 }
 
-function filterFieldOptions(entityId: string): Array<{ label: string; value: string }> {
-  const schema = schemaById(entityId)
+function filterFieldOptions(block: DashboardSummaryBlock): Array<{ label: string; value: string }> {
+  const schema = schemaById(block.entityId)
   return [
+    { label: 'Расчётное значение', value: SUMMARY_VALUE_FIELD_CODE },
     ...SYSTEM_FILTER_FIELDS,
     ...(schema?.fields.map((field) => ({ label: field.name, value: field.code })) ?? []),
   ]
@@ -182,18 +184,23 @@ function filterOperatorOptions(block: DashboardSummaryBlock, filter: DashboardFi
     ]
   }
 
+  if (kind === 'number') {
+    return [
+      { label: 'Больше', value: 'after' },
+      { label: 'Меньше', value: 'before' },
+      { label: 'Равно', value: 'equals' },
+      { label: 'Не равно', value: 'notEquals' },
+      { label: 'Заполнено', value: 'filled' },
+      { label: 'Пусто', value: 'empty' },
+    ]
+  }
+
   return [
     { label: 'Содержит', value: 'contains' },
     { label: 'Равно', value: 'equals' },
     { label: 'Не равно', value: 'notEquals' },
     { label: 'Заполнено', value: 'filled' },
     { label: 'Пусто', value: 'empty' },
-    ...(kind === 'number'
-      ? [
-          { label: 'Больше', value: 'after' as DashboardFilterOperator },
-          { label: 'Меньше', value: 'before' as DashboardFilterOperator },
-        ]
-      : []),
   ]
 }
 
@@ -224,6 +231,7 @@ function fieldByCode(entityId: string, fieldCode: string): EntityField | undefin
 }
 
 function filterFieldKind(block: DashboardSummaryBlock, fieldCode: string): DashboardFilterFieldKind {
+  if (fieldCode === SUMMARY_VALUE_FIELD_CODE) return 'number'
   if (fieldCode === '__createdAt' || fieldCode === '__updatedAt') return 'date'
   if (fieldCode === '__status') return 'status'
 
@@ -351,6 +359,7 @@ function filterDescription(block: DashboardSummaryBlock, filter: DashboardFilter
 }
 
 function humanFieldName(block: DashboardSummaryBlock, fieldCode: string): string {
+  if (fieldCode === SUMMARY_VALUE_FIELD_CODE) return 'расчётное значение'
   if (fieldCode === '__status') return 'статус'
   if (fieldCode === '__createdAt') return 'дата создания'
   if (fieldCode === '__updatedAt') return 'дата изменения'
@@ -382,10 +391,10 @@ function hasSelectValue(block: DashboardSummaryBlock, filter: DashboardFilter): 
 function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
   const actions = [
     ...(block.filters ?? [])
-      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesAnyObject(block, filter))
+      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesBlock(block, filter))
       .map((filter) => filter.thenAction ?? 'none'),
     ...(block.filterGroups ?? [])
-      .filter((group) => group.thenAction !== 'none' && groupMatchesAnyObject(block, group))
+      .filter((group) => group.thenAction !== 'none' && groupMatchesBlock(block, group))
       .map((group) => group.thenAction),
   ]
 
@@ -395,18 +404,32 @@ function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
   return 'none'
 }
 
+function filterMatchesBlock(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
+  if (filter.fieldCode === SUMMARY_VALUE_FIELD_CODE) {
+    return matchesDashboardFilterValue(calculateSummaryRawValue(block) ?? undefined, filter, 'number')
+  }
+  return filterMatchesAnyObject(block, filter)
+}
+
 function filterMatchesAnyObject(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
   return platform.objectsByEntity(block.entityId).some((object) =>
     matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
   )
 }
 
-function groupMatchesAnyObject(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
-  return platform.objectsByEntity(block.entityId).some((object) =>
-    group.filters.every((filter) =>
+function groupMatchesBlock(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
+  const summaryFilters = group.filters.filter((filter) => filter.fieldCode === SUMMARY_VALUE_FIELD_CODE)
+  const objectFilters = group.filters.filter((filter) => filter.fieldCode !== SUMMARY_VALUE_FIELD_CODE)
+  const summaryMatches = summaryFilters.every((filter) =>
+    matchesDashboardFilterValue(calculateSummaryRawValue(block) ?? undefined, filter, 'number'),
+  )
+  const objectsMatch = objectFilters.length === 0 || platform.objectsByEntity(block.entityId).some((object) =>
+    objectFilters.every((filter) =>
       matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
     ),
   )
+
+  return summaryMatches && objectsMatch
 }
 
 function thenActionLabel(action: DashboardThenAction): string {
@@ -653,15 +676,20 @@ function defaultTitle(block: DashboardSummaryBlock): string {
 }
 
 function calculateSummaryValue(block: DashboardSummaryBlock): string {
+  const value = calculateSummaryRawValue(block)
+  return value === null ? '—' : formatNumber(value)
+}
+
+function calculateSummaryRawValue(block: DashboardSummaryBlock): number | null {
   const objects = filteredObjects(block)
-  if (block.metric === 'count') return formatNumber(objects.length)
+  if (block.metric === 'count') return objects.length
 
   const values = objects.map((object) => object.values[block.fieldCode])
-  if (block.metric === 'filled') return formatNumber(values.filter(isFilled).length)
-  if (block.metric === 'empty') return formatNumber(values.filter((value) => !isFilled(value)).length)
+  if (block.metric === 'filled') return values.filter(isFilled).length
+  if (block.metric === 'empty') return values.filter((value) => !isFilled(value)).length
   if (block.metric === 'unique') {
     const uniqueValues = new Set(values.filter(isFilled).map((value) => String(value)))
-    return formatNumber(uniqueValues.size)
+    return uniqueValues.size
   }
 
   const numericValues = values
@@ -669,14 +697,15 @@ function calculateSummaryValue(block: DashboardSummaryBlock): string {
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value))
 
-  if (numericValues.length === 0) return '—'
-  if (block.metric === 'sum') return formatNumber(numericValues.reduce((sum, value) => sum + value, 0))
-  return formatNumber(numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length)
+  if (numericValues.length === 0) return null
+  if (block.metric === 'sum') return numericValues.reduce((sum, value) => sum + value, 0)
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
 }
 
 function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
+  const objectFilters = (block.filters ?? []).filter((filter) => filter.fieldCode !== SUMMARY_VALUE_FIELD_CODE)
   return platform.objectsByEntity(block.entityId).filter((object) =>
-    (block.filters ?? []).every((filter) =>
+    objectFilters.every((filter) =>
       matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
     ),
   )
@@ -810,76 +839,97 @@ async function save(): Promise<void> {
 
         <template v-else>
           <div class="summary-inspector__header">
-            <h3 class="surface-title">Настройка блока</h3>
+            <div class="summary-inspector__title">
+              <h3 class="surface-title">Настройка виджета</h3>
+              <p>Название, расчёт и правила подсветки карточки на главной.</p>
+            </div>
             <UiButton label="Удалить" severity="danger" variant="outlined" @click="deleteBlock(selectedBlock.id)" />
           </div>
 
-          <div class="summary-inspector__form">
-            <div class="form-field full">
-              <label>Название</label>
-              <UiInput v-model="selectedBlock.title" />
-            </div>
-
-            <div class="form-field full">
-              <label>Описание и условия расчёта</label>
-              <UiTextarea v-model="selectedBlock.description" :rows="3" />
-            </div>
-
-            <div class="form-field">
-              <label>Сущность</label>
-              <UiSelect
-                :model-value="selectedBlock.entityId"
-                :options="entityOptions"
-                @update:model-value="setBlockEntity(selectedBlock, $event)"
-              />
-            </div>
-
-            <div class="form-field">
-              <label>Расчёт</label>
-              <UiSelect
-                :model-value="selectedBlock.metric"
-                :options="metricOptions"
-                @update:model-value="setBlockMetric(selectedBlock, $event)"
-              />
-            </div>
-
-            <div class="form-field">
-              <label>Поле расчёта</label>
-              <UiSelect
-                :model-value="selectedBlock.fieldCode"
-                :options="metricFieldOptions(selectedBlock.entityId)"
-                :disabled="selectedBlock.metric === 'count'"
-                @update:model-value="setBlockField(selectedBlock, $event)"
-              />
-            </div>
-
-          </div>
-
-          <div class="summary-filter-section">
-            <div class="summary-filter-section__header">
-              <h3 class="surface-title">Условия</h3>
-              <div class="summary-filter-section__actions">
-                <UiButton
-                  label="Добавить условие"
-                  icon="pi pi-plus"
-                  severity="secondary"
-                  variant="outlined"
-                  :disabled="selectedBlock.filters.length >= 1 || selectedBlock.filterGroups.length > 0"
-                  @click="addFilter(selectedBlock)"
-                />
-                <UiButton
-                  label="Добавить группу условий"
-                  icon="pi pi-sitemap"
-                  severity="secondary"
-                  variant="outlined"
-                  :disabled="selectedBlock.filterGroups.length >= 1 || selectedBlock.filters.length > 0"
-                  @click="addFilterGroup(selectedBlock)"
-                />
+          <section class="summary-panel">
+            <div class="summary-panel__header">
+              <span class="summary-panel__step">1</span>
+              <div>
+                <h4>Настройки блока</h4>
+                <p>Определяют, что именно будет показано крупным числом.</p>
               </div>
             </div>
 
+            <div class="summary-inspector__form">
+              <div class="form-field full">
+                <label>Название</label>
+                <UiInput v-model="selectedBlock.title" />
+              </div>
+
+              <div class="form-field full">
+                <label>Описание для подсказки</label>
+                <UiTextarea v-model="selectedBlock.description" :rows="3" />
+              </div>
+
+              <div class="form-field">
+                <label>Сущность</label>
+                <UiSelect
+                  :model-value="selectedBlock.entityId"
+                  :options="entityOptions"
+                  @update:model-value="setBlockEntity(selectedBlock, $event)"
+                />
+              </div>
+
+              <div class="form-field">
+                <label>Расчёт</label>
+                <UiSelect
+                  :model-value="selectedBlock.metric"
+                  :options="metricOptions"
+                  @update:model-value="setBlockMetric(selectedBlock, $event)"
+                />
+              </div>
+
+              <div class="form-field full">
+                <label>Поле расчёта</label>
+                <UiSelect
+                  :model-value="selectedBlock.fieldCode"
+                  :options="metricFieldOptions(selectedBlock.entityId)"
+                  :disabled="selectedBlock.metric === 'count'"
+                  @update:model-value="setBlockField(selectedBlock, $event)"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section class="summary-panel summary-filter-section">
+            <div class="summary-filter-section__header">
+              <div class="summary-panel__header">
+                <span class="summary-panel__step">2</span>
+                <div>
+                  <h4>Условия</h4>
+                  <p>Выберите один сценарий подсветки: одиночное правило или группу правил.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="condition-mode-grid" aria-label="Тип условия">
+              <button
+                type="button"
+                class="condition-mode-card"
+                :class="{ active: selectedBlock.filters.length > 0 }"
+                :disabled="selectedBlock.filterGroups.length > 0"
+                @click="addFilter(selectedBlock)"
+              >
+                <strong>Одно условие</strong>
+              </button>
+              <button
+                type="button"
+                class="condition-mode-card"
+                :class="{ active: selectedBlock.filterGroups.length > 0 }"
+                :disabled="selectedBlock.filters.length > 0"
+                @click="addFilterGroup(selectedBlock)"
+              >
+                <strong>Группа условий</strong>
+              </button>
+            </div>
+
             <div v-if="selectedBlock.filters.length === 0 && selectedBlock.filterGroups.length === 0" class="summary-filter-empty">
-              Условия не заданы. Карточка будет без светофорной подсветки.
+              Условия не заданы. Выберите сценарий выше, если виджет нужно подсвечивать по светофорному правилу.
             </div>
 
             <div v-if="selectedBlock.filters.length > 0" class="summary-filter-list">
@@ -888,7 +938,7 @@ async function save(): Promise<void> {
                   <label>Поле</label>
                   <UiSelect
                     :model-value="filter.fieldCode"
-                    :options="filterFieldOptions(selectedBlock.entityId)"
+                    :options="filterFieldOptions(selectedBlock)"
                     @update:model-value="setFilterField(selectedBlock, filter, $event)"
                   />
                 </div>
@@ -924,7 +974,7 @@ async function save(): Promise<void> {
                     <p>Все условия внутри группы должны выполниться одновременно.</p>
                   </div>
                   <div class="summary-filter-section__actions">
-                    <UiButton label="Добавить условие" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addGroupFilter(selectedBlock, group)" />
+                    <UiButton label="Добавить строку" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addGroupFilter(selectedBlock, group)" />
                     <UiButton label="Удалить группу" severity="danger" variant="outlined" @click="deleteFilterGroup(selectedBlock, group.id)" />
                   </div>
                 </div>
@@ -939,7 +989,7 @@ async function save(): Promise<void> {
                     <label>Поле</label>
                     <UiSelect
                       :model-value="filter.fieldCode"
-                      :options="filterFieldOptions(selectedBlock.entityId)"
+                      :options="filterFieldOptions(selectedBlock)"
                       @update:model-value="setFilterField(selectedBlock, filter, $event)"
                     />
                   </div>
@@ -963,7 +1013,7 @@ async function save(): Promise<void> {
                 </article>
               </article>
             </div>
-          </div>
+          </section>
         </template>
       </aside>
     </div>
@@ -996,8 +1046,65 @@ async function save(): Promise<void> {
 .summary-filter-section__header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+}
+
+.summary-inspector__title {
+  min-width: 0;
+}
+
+.summary-inspector__title p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.summary-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(249, 250, 251, 0.72), rgba(255, 255, 255, 0.96)),
+    var(--color-surface);
+}
+
+.summary-panel__header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.summary-panel__step {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.summary-panel__header h4 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.summary-panel__header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .summary-filter-section__actions {
@@ -1279,24 +1386,74 @@ async function save(): Promise<void> {
 .summary-inspector__form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
+  gap: 12px;
+}
+
+.summary-inspector__form .form-field {
+  gap: 6px;
 }
 
 .summary-filter-section {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
+  gap: 14px;
 }
 
 .summary-filter-empty {
   padding: 12px;
   border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
+  border: 1px dashed var(--color-border);
+  background: rgba(249, 250, 251, 0.72);
   color: var(--color-text-secondary);
   font-size: 12px;
+  line-height: 1.4;
+}
+
+.condition-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.condition-mode-card {
+  min-width: 0;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.condition-mode-card strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.condition-mode-card:hover:not(:disabled),
+.condition-mode-card:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.condition-mode-card.active {
+  border-color: var(--color-accent);
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.1), rgba(239, 246, 255, 0.78)),
+    var(--color-surface);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.condition-mode-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .summary-filter-list {
@@ -1315,7 +1472,7 @@ async function save(): Promise<void> {
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-surface-muted);
+  background: rgba(249, 250, 251, 0.88);
 }
 
 .summary-filter-row--nested {
@@ -1353,13 +1510,15 @@ async function save(): Promise<void> {
 
 .summary-filter-group {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
   padding: 12px;
   overflow: hidden;
   border: 1px solid #bfdbfe;
   border-radius: var(--radius-md);
-  background: #f8fbff;
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.8), rgba(255, 255, 255, 0.96)),
+    #f8fbff;
 }
 
 .summary-filter-group__header {
@@ -1402,6 +1561,13 @@ async function save(): Promise<void> {
 
   .summary-inspector {
     position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .summary-inspector__form,
+  .condition-mode-grid {
+    grid-template-columns: 1fr;
   }
 }
 

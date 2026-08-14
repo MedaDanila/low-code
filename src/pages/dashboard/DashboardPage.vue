@@ -4,7 +4,7 @@ import { Info } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
-import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
+import { matchesDashboardFilter, matchesDashboardFilterValue, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { usePermissions } from '../../shared/lib/usePermissions'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
@@ -40,6 +40,7 @@ const permissions = usePermissions()
 const summaryWidthStepPx = 10
 const defaultSummaryWidthPx = 220
 const maxSummaryWidthPx = 960
+const SUMMARY_VALUE_FIELD_CODE = '__summaryValue'
 
 const currentUserSettings = computed(() =>
   auth.currentUser ? platform.userSettingsByUser(auth.currentUser.id) : undefined,
@@ -81,15 +82,20 @@ const summaryGroups = computed<SummaryGroup[]>(() => {
 })
 
 function calculateSummaryValue(block: DashboardSummaryBlock): string {
+  const value = calculateSummaryRawValue(block)
+  return value === null ? '—' : formatNumber(value)
+}
+
+function calculateSummaryRawValue(block: DashboardSummaryBlock): number | null {
   const objects = filteredObjects(block)
-  if (block.metric === 'count') return formatNumber(objects.length)
+  if (block.metric === 'count') return objects.length
 
   const values = objects.map((object) => object.values[block.fieldCode])
-  if (block.metric === 'filled') return formatNumber(values.filter(isFilled).length)
-  if (block.metric === 'empty') return formatNumber(values.filter((value) => !isFilled(value)).length)
+  if (block.metric === 'filled') return values.filter(isFilled).length
+  if (block.metric === 'empty') return values.filter((value) => !isFilled(value)).length
   if (block.metric === 'unique') {
     const uniqueValues = new Set(values.filter(isFilled).map((value) => String(value)))
-    return formatNumber(uniqueValues.size)
+    return uniqueValues.size
   }
 
   const numericValues = values
@@ -97,9 +103,9 @@ function calculateSummaryValue(block: DashboardSummaryBlock): string {
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value))
 
-  if (numericValues.length === 0) return '—'
-  if (block.metric === 'sum') return formatNumber(numericValues.reduce((sum, value) => sum + value, 0))
-  return formatNumber(numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length)
+  if (numericValues.length === 0) return null
+  if (block.metric === 'sum') return numericValues.reduce((sum, value) => sum + value, 0)
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
 }
 
 function isFilled(value: ObjectValue | undefined): boolean {
@@ -221,6 +227,7 @@ function filterDescription(block: DashboardSummaryBlock, filter: DashboardFilter
 }
 
 function humanFieldName(block: DashboardSummaryBlock, fieldCode: string): string {
+  if (fieldCode === SUMMARY_VALUE_FIELD_CODE) return 'расчётное значение'
   if (fieldCode === '__status') return 'статус'
   if (fieldCode === '__createdAt') return 'дата создания'
   if (fieldCode === '__updatedAt') return 'дата изменения'
@@ -270,6 +277,7 @@ function fieldByCode(entityId: string, fieldCode: string): EntityField | undefin
 }
 
 function filterFieldKind(block: DashboardSummaryBlock, fieldCode: string): DashboardFilterFieldKind {
+  if (fieldCode === SUMMARY_VALUE_FIELD_CODE) return 'number'
   if (fieldCode === '__createdAt' || fieldCode === '__updatedAt') return 'date'
   if (fieldCode === '__status') return 'status'
 
@@ -288,10 +296,10 @@ function needsFilterValue(operator: DashboardFilterOperator): boolean {
 function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
   const actions = [
     ...(block.filters ?? [])
-      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesAnyObject(block, filter))
+      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesBlock(block, filter))
       .map((filter) => filter.thenAction ?? 'none'),
     ...(block.filterGroups ?? [])
-      .filter((group) => group.thenAction !== 'none' && groupMatchesAnyObject(block, group))
+      .filter((group) => group.thenAction !== 'none' && groupMatchesBlock(block, group))
       .map((group) => group.thenAction),
   ]
 
@@ -301,18 +309,32 @@ function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
   return 'none'
 }
 
+function filterMatchesBlock(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
+  if (filter.fieldCode === SUMMARY_VALUE_FIELD_CODE) {
+    return matchesDashboardFilterValue(calculateSummaryRawValue(block) ?? undefined, filter, 'number')
+  }
+  return filterMatchesAnyObject(block, filter)
+}
+
 function filterMatchesAnyObject(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
   return platform.objectsByEntity(block.entityId).some((object) =>
     matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
   )
 }
 
-function groupMatchesAnyObject(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
-  return platform.objectsByEntity(block.entityId).some((object) =>
-    group.filters.every((filter) =>
+function groupMatchesBlock(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
+  const summaryFilters = group.filters.filter((filter) => filter.fieldCode === SUMMARY_VALUE_FIELD_CODE)
+  const objectFilters = group.filters.filter((filter) => filter.fieldCode !== SUMMARY_VALUE_FIELD_CODE)
+  const summaryMatches = summaryFilters.every((filter) =>
+    matchesDashboardFilterValue(calculateSummaryRawValue(block) ?? undefined, filter, 'number'),
+  )
+  const objectsMatch = objectFilters.length === 0 || platform.objectsByEntity(block.entityId).some((object) =>
+    objectFilters.every((filter) =>
       matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
     ),
   )
+
+  return summaryMatches && objectsMatch
 }
 
 function thenActionLabel(action: DashboardThenAction): string {
@@ -331,8 +353,9 @@ function lowerFirst(value: string): string {
 }
 
 function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
+  const objectFilters = (block.filters ?? []).filter((filter) => filter.fieldCode !== SUMMARY_VALUE_FIELD_CODE)
   return platform.objectsByEntity(block.entityId).filter((object) =>
-    (block.filters ?? []).every((filter) =>
+    objectFilters.every((filter) =>
       matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
     ),
   )
