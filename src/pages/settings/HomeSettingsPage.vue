@@ -15,8 +15,10 @@ import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import type {
   DashboardFilter,
+  DashboardFilterGroup,
   DashboardFilterOperator,
   DashboardSummaryBlock,
+  DashboardThenAction,
   EntityField,
   EntityObject,
   EntitySchema,
@@ -32,6 +34,7 @@ interface SummaryPreview {
   schema: EntitySchema
   title: string
   value: string
+  thenAction: DashboardThenAction
 }
 
 interface SummaryPreviewGroup {
@@ -68,6 +71,12 @@ const metricOptions: Array<{ label: string; value: SummaryMetric }> = [
   { label: 'Уникальные значения', value: 'unique' },
   { label: 'Сумма', value: 'sum' },
   { label: 'Среднее', value: 'average' },
+]
+const thenActionOptions: Array<{ label: string; value: DashboardThenAction }> = [
+  { label: 'Ничего', value: 'none' },
+  { label: 'Зелёный', value: 'green' },
+  { label: 'Жёлтый', value: 'yellow' },
+  { label: 'Красный', value: 'red' },
 ]
 
 const availableSchemas = computed(() =>
@@ -108,6 +117,7 @@ const previewGroups = computed<SummaryPreviewGroup[]>(() => {
       schema,
       title: block.title || defaultTitle(block),
       value: calculateSummaryValue(block),
+      thenAction: summaryThenAction(block),
     })
   })
 
@@ -286,7 +296,7 @@ function clampSummaryWidth(block: DashboardSummaryBlock, widthPx: number): numbe
 }
 
 function hasSummaryInfo(block: DashboardSummaryBlock): boolean {
-  return Boolean(block.description?.trim() || block.filters?.length)
+  return Boolean(block.description?.trim() || block.filters?.length || block.filterGroups?.length)
 }
 
 function summaryInfoText(block: DashboardSummaryBlock): string {
@@ -299,9 +309,17 @@ function summaryFiltersDescription(block: DashboardSummaryBlock): string {
   const filters = (block.filters ?? [])
     .map((filter) => filterDescription(block, filter))
     .filter(Boolean)
+  const groups = (block.filterGroups ?? [])
+    .map((group, index) => {
+      const description = group.filters.map((filter) => filterDescription(block, filter)).filter(Boolean).join(' и ')
+      if (!description) return ''
+      const action = group.thenAction !== 'none' ? ` тогда ${thenActionLabel(group.thenAction).toLowerCase()}` : ''
+      return `группа ${index + 1}: ${description}${action}`
+    })
+    .filter(Boolean)
 
-  if (filters.length === 0) return ''
-  return `В расчёт попадают объекты, у которых ${filters.join(' и ')}.`
+  if (filters.length === 0 && groups.length === 0) return ''
+  return `Условия: ${[...filters, ...groups].join('; ')}.`
 }
 
 function filterDescription(block: DashboardSummaryBlock, filter: DashboardFilter): string {
@@ -309,23 +327,27 @@ function filterDescription(block: DashboardSummaryBlock, filter: DashboardFilter
   const value = humanFilterValue(block, filter)
   const kind = filterFieldKind(block, filter.fieldCode)
 
-  if (filter.operator === 'today') return `${fieldName} совпадает с текущей датой`
-  if (filter.operator === 'beforeToday') return `${fieldName} раньше текущей даты`
-  if (filter.operator === 'afterToday') return `${fieldName} позже текущей даты`
-  if (filter.operator === 'filled') return `${fieldName} заполнено`
-  if (filter.operator === 'empty') return `${fieldName} не заполнено`
-  if (filter.operator === 'contains') return value ? `${fieldName} содержит ${quoteValue(value)}` : `${fieldName} содержит заданное значение`
-  if (filter.operator === 'notEquals') return value ? `${fieldName} не имеет значение ${quoteValue(value)}` : `${fieldName} не равно заданному значению`
+  const action = filter.thenAction && filter.thenAction !== 'none'
+    ? ` тогда ${thenActionLabel(filter.thenAction).toLowerCase()}`
+    : ''
+
+  if (filter.operator === 'today') return `${fieldName} совпадает с текущей датой${action}`
+  if (filter.operator === 'beforeToday') return `${fieldName} раньше текущей даты${action}`
+  if (filter.operator === 'afterToday') return `${fieldName} позже текущей даты${action}`
+  if (filter.operator === 'filled') return `${fieldName} заполнено${action}`
+  if (filter.operator === 'empty') return `${fieldName} не заполнено${action}`
+  if (filter.operator === 'contains') return value ? `${fieldName} содержит ${quoteValue(value)}${action}` : `${fieldName} содержит заданное значение${action}`
+  if (filter.operator === 'notEquals') return value ? `${fieldName} не имеет значение ${quoteValue(value)}${action}` : `${fieldName} не равно заданному значению${action}`
 
   if (filter.operator === 'before') {
-    return value ? `${fieldName} ${kind === 'number' ? 'меньше' : 'раньше'} ${quoteValue(value)}` : `${fieldName} меньше заданного значения`
+    return value ? `${fieldName} ${kind === 'number' ? 'меньше' : 'раньше'} ${quoteValue(value)}${action}` : `${fieldName} меньше заданного значения${action}`
   }
 
   if (filter.operator === 'after') {
-    return value ? `${fieldName} ${kind === 'number' ? 'больше' : 'позже'} ${quoteValue(value)}` : `${fieldName} больше заданного значения`
+    return value ? `${fieldName} ${kind === 'number' ? 'больше' : 'позже'} ${quoteValue(value)}${action}` : `${fieldName} больше заданного значения${action}`
   }
 
-  return value ? `${fieldName} имеет значение ${quoteValue(value)}` : `${fieldName} равно заданному значению`
+  return value ? `${fieldName} имеет значение ${quoteValue(value)}${action}` : `${fieldName} равно заданному значению${action}`
 }
 
 function humanFieldName(block: DashboardSummaryBlock, fieldCode: string): string {
@@ -357,11 +379,46 @@ function hasSelectValue(block: DashboardSummaryBlock, filter: DashboardFilter): 
   return filterValueOptions(block, filter).length > 0
 }
 
+function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
+  const actions = [
+    ...(block.filters ?? [])
+      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesAnyObject(block, filter))
+      .map((filter) => filter.thenAction ?? 'none'),
+    ...(block.filterGroups ?? [])
+      .filter((group) => group.thenAction !== 'none' && groupMatchesAnyObject(block, group))
+      .map((group) => group.thenAction),
+  ]
+
+  if (actions.includes('red')) return 'red'
+  if (actions.includes('yellow')) return 'yellow'
+  if (actions.includes('green')) return 'green'
+  return 'none'
+}
+
+function filterMatchesAnyObject(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
+  return platform.objectsByEntity(block.entityId).some((object) =>
+    matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
+  )
+}
+
+function groupMatchesAnyObject(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
+  return platform.objectsByEntity(block.entityId).some((object) =>
+    group.filters.every((filter) =>
+      matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
+    ),
+  )
+}
+
+function thenActionLabel(action: DashboardThenAction): string {
+  return thenActionOptions.find((option) => option.value === action)?.label ?? 'Ничего'
+}
+
 function setBlockEntity(block: DashboardSummaryBlock, value: SelectValue): void {
   block.entityId = String(value ?? '')
   const schema = schemaById(block.entityId)
   block.fieldCode = block.metric === 'count' ? '' : schema?.fields[0]?.code ?? ''
   block.filters = []
+  block.filterGroups = []
   block.title = defaultTitle(block)
 }
 
@@ -403,6 +460,7 @@ function addBlock(): void {
     widthPx: defaultSummaryWidthPx,
     order: editable.value.home.summaryBlocks.length + 1,
     filters: [],
+    filterGroups: [],
   }
   block.widthPx = clampSummaryWidth(block, block.widthPx)
   editable.value.home.summaryBlocks.push(block)
@@ -410,17 +468,52 @@ function addBlock(): void {
 }
 
 function addFilter(block: DashboardSummaryBlock): void {
+  if (block.filters.length >= 1) return
+  block.filterGroups = []
   const filter: DashboardFilter = {
     id: createId('flt'),
     fieldCode: '__createdAt',
     operator: 'today',
     value: '',
+    thenAction: 'none',
   }
   block.filters.push(filter)
 }
 
 function deleteFilter(block: DashboardSummaryBlock, filterId: string): void {
   block.filters = block.filters.filter((filter) => filter.id !== filterId)
+}
+
+function addFilterGroup(block: DashboardSummaryBlock): void {
+  if ((block.filterGroups ?? []).length >= 1) return
+  block.filters = []
+  const group: DashboardFilterGroup = {
+    id: createId('fg'),
+    filters: [],
+    thenAction: 'none',
+  }
+  block.filterGroups = [...(block.filterGroups ?? []), group]
+  addGroupFilter(block, group)
+}
+
+function deleteFilterGroup(block: DashboardSummaryBlock, groupId: string): void {
+  block.filterGroups = (block.filterGroups ?? []).filter((group) => group.id !== groupId)
+}
+
+function addGroupFilter(block: DashboardSummaryBlock, group: DashboardFilterGroup): void {
+  group.filters.push({
+    id: createId('flt'),
+    fieldCode: '__createdAt',
+    operator: 'today',
+    value: '',
+    thenAction: 'none',
+  })
+  block.filterGroups = [...(block.filterGroups ?? [])]
+}
+
+function deleteGroupFilter(block: DashboardSummaryBlock, group: DashboardFilterGroup, filterId: string): void {
+  group.filters = group.filters.filter((filter) => filter.id !== filterId)
+  block.filterGroups = [...(block.filterGroups ?? [])]
 }
 
 function deleteBlock(blockId: string): void {
@@ -478,8 +571,39 @@ function normalizeOrder(): void {
       showInfo: hasSummaryInfo(block),
       description: block.description ?? '',
       widthPx: clampSummaryWidth(block, currentBlockWidthPx(block)),
-      filters: block.filters ?? [],
+      ...normalizeBlockConditions(block),
     }))
+}
+
+function normalizeBlockConditions(block: DashboardSummaryBlock): Pick<DashboardSummaryBlock, 'filters' | 'filterGroups'> {
+  const filters = (block.filters ?? [])
+    .map((filter) => ({
+      ...filter,
+      thenAction: normalizeThenAction(filter.thenAction),
+    }))
+    .slice(0, 1)
+
+  if (filters.length > 0) {
+    return {
+      filters,
+      filterGroups: [],
+    }
+  }
+
+  return {
+    filters: [],
+    filterGroups: (block.filterGroups ?? [])
+      .map((group) => ({
+        ...group,
+        thenAction: normalizeThenAction(group.thenAction),
+        filters: group.filters ?? [],
+      }))
+      .slice(0, 1),
+  }
+}
+
+function normalizeThenAction(value: unknown): DashboardThenAction {
+  return value === 'green' || value === 'yellow' || value === 'red' ? value : 'none'
 }
 
 function startResize(block: DashboardSummaryBlock, event: PointerEvent): void {
@@ -640,6 +764,9 @@ async function save(): Promise<void> {
                   'summary-card--dragging': draggedBlockId === summary.block.id,
                   'summary-card--resizing': resizingBlockId === summary.block.id,
                   'summary-card--has-info': hasSummaryInfo(summary.block),
+                  'summary-card--then-green': summary.thenAction === 'green',
+                  'summary-card--then-yellow': summary.thenAction === 'yellow',
+                  'summary-card--then-red': summary.thenAction === 'red',
                 }"
                 :style="summaryCardStyle(summary.block)"
                 draggable="true"
@@ -731,12 +858,31 @@ async function save(): Promise<void> {
           <div class="summary-filter-section">
             <div class="summary-filter-section__header">
               <h3 class="surface-title">Условия</h3>
-              <UiButton label="Добавить условие" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addFilter(selectedBlock)" />
+              <div class="summary-filter-section__actions">
+                <UiButton
+                  label="Добавить условие"
+                  icon="pi pi-plus"
+                  severity="secondary"
+                  variant="outlined"
+                  :disabled="selectedBlock.filters.length >= 1 || selectedBlock.filterGroups.length > 0"
+                  @click="addFilter(selectedBlock)"
+                />
+                <UiButton
+                  label="Добавить группу условий"
+                  icon="pi pi-sitemap"
+                  severity="secondary"
+                  variant="outlined"
+                  :disabled="selectedBlock.filterGroups.length >= 1 || selectedBlock.filters.length > 0"
+                  @click="addFilterGroup(selectedBlock)"
+                />
+              </div>
             </div>
 
-            <div v-if="selectedBlock.filters.length === 0" class="summary-filter-empty">Блок считает все объекты выбранной сущности.</div>
+            <div v-if="selectedBlock.filters.length === 0 && selectedBlock.filterGroups.length === 0" class="summary-filter-empty">
+              Условия не заданы. Карточка будет без светофорной подсветки.
+            </div>
 
-            <div v-else class="summary-filter-list">
+            <div v-if="selectedBlock.filters.length > 0" class="summary-filter-list">
               <article v-for="filter in selectedBlock.filters" :key="filter.id" class="summary-filter-row">
                 <div class="form-field">
                   <label>Поле</label>
@@ -747,26 +893,74 @@ async function save(): Promise<void> {
                   />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field summary-filter-condition-field">
                   <label>Условие</label>
                   <UiSelect
                     :model-value="filter.operator"
                     :options="filterOperatorOptions(selectedBlock, filter)"
                     @update:model-value="setFilterOperator(selectedBlock, filter, $event)"
                   />
-                </div>
-
-                <div v-if="needsFilterValue(filter.operator)" class="form-field">
-                  <label>Значение</label>
                   <UiSelect
-                    v-if="hasSelectValue(selectedBlock, filter)"
+                    v-if="needsFilterValue(filter.operator) && hasSelectValue(selectedBlock, filter)"
                     v-model="filter.value"
                     :options="filterValueOptions(selectedBlock, filter)"
                   />
-                  <UiInput v-else v-model="filter.value" />
+                  <UiInput v-else-if="needsFilterValue(filter.operator)" v-model="filter.value" />
                 </div>
 
+                <div class="form-field">
+                  <label>Тогда</label>
+                  <UiSelect v-model="filter.thenAction" :options="thenActionOptions" />
+                </div>
                 <UiButton label="Удалить" severity="danger" variant="outlined" @click="deleteFilter(selectedBlock, filter.id)" />
+              </article>
+            </div>
+
+            <div v-if="selectedBlock.filterGroups.length > 0" class="summary-filter-list">
+              <article v-for="group in selectedBlock.filterGroups" :key="group.id" class="summary-filter-group">
+                <div class="summary-filter-group__header">
+                  <div>
+                    <h4>Группа условий</h4>
+                    <p>Все условия внутри группы должны выполниться одновременно.</p>
+                  </div>
+                  <div class="summary-filter-section__actions">
+                    <UiButton label="Добавить условие" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addGroupFilter(selectedBlock, group)" />
+                    <UiButton label="Удалить группу" severity="danger" variant="outlined" @click="deleteFilterGroup(selectedBlock, group.id)" />
+                  </div>
+                </div>
+
+                <div class="form-field">
+                  <label>Тогда</label>
+                  <UiSelect v-model="group.thenAction" :options="thenActionOptions" />
+                </div>
+
+                <article v-for="filter in group.filters" :key="filter.id" class="summary-filter-row summary-filter-row--nested">
+                  <div class="form-field">
+                    <label>Поле</label>
+                    <UiSelect
+                      :model-value="filter.fieldCode"
+                      :options="filterFieldOptions(selectedBlock.entityId)"
+                      @update:model-value="setFilterField(selectedBlock, filter, $event)"
+                    />
+                  </div>
+
+                  <div class="form-field summary-filter-condition-field">
+                    <label>Условие</label>
+                    <UiSelect
+                      :model-value="filter.operator"
+                      :options="filterOperatorOptions(selectedBlock, filter)"
+                      @update:model-value="setFilterOperator(selectedBlock, filter, $event)"
+                    />
+                    <UiSelect
+                      v-if="needsFilterValue(filter.operator) && hasSelectValue(selectedBlock, filter)"
+                      v-model="filter.value"
+                      :options="filterValueOptions(selectedBlock, filter)"
+                    />
+                    <UiInput v-else-if="needsFilterValue(filter.operator)" v-model="filter.value" />
+                  </div>
+
+                  <UiButton label="Удалить" severity="danger" variant="outlined" @click="deleteGroupFilter(selectedBlock, group, filter.id)" />
+                </article>
               </article>
             </div>
           </div>
@@ -804,6 +998,30 @@ async function save(): Promise<void> {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.summary-filter-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.summary-filter-section__header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.summary-filter-section__header > .summary-filter-section__actions {
+  width: 100%;
+  justify-content: stretch;
+}
+
+.summary-filter-section__actions :deep(.p-button) {
+  flex: 1 1 150px;
+  justify-content: center;
+  min-width: 0;
 }
 
 .summary-inspector {
@@ -848,11 +1066,12 @@ async function save(): Promise<void> {
   flex-wrap: wrap;
   align-items: stretch;
   gap: 12px;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .summary-card {
   position: relative;
+  z-index: 0;
   flex: 0 0 var(--summary-width);
   width: var(--summary-width);
   max-width: 100%;
@@ -867,6 +1086,74 @@ async function save(): Promise<void> {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   box-sizing: border-box;
+}
+
+.summary-card:hover,
+.summary-card:focus-within {
+  z-index: 30;
+}
+
+.summary-card--then-green,
+.summary-card--then-yellow,
+.summary-card--then-red {
+  border-color: var(--summary-signal-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 10px 24px var(--summary-signal-shadow);
+}
+
+.summary-card--then-green::before,
+.summary-card--then-yellow::before,
+.summary-card--then-red::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: linear-gradient(90deg, var(--summary-signal), var(--summary-signal-soft));
+  pointer-events: none;
+}
+
+.summary-card--then-green .summary-card__title,
+.summary-card--then-yellow .summary-card__title,
+.summary-card--then-red .summary-card__title,
+.summary-card--then-green strong,
+.summary-card--then-yellow strong,
+.summary-card--then-red strong {
+  color: var(--summary-signal-text);
+}
+
+.summary-card--then-green {
+  --summary-signal: #16a34a;
+  --summary-signal-soft: #86efac;
+  --summary-signal-border: #4ade80;
+  --summary-signal-shadow: rgba(22, 163, 74, 0.16);
+  --summary-signal-text: #14532d;
+  background:
+    linear-gradient(180deg, rgba(22, 163, 74, 0.18) 0%, rgba(22, 163, 74, 0.08) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #f0fdf4;
+}
+
+.summary-card--then-yellow {
+  --summary-signal: #d97706;
+  --summary-signal-soft: #fcd34d;
+  --summary-signal-border: #fbbf24;
+  --summary-signal-shadow: rgba(217, 119, 6, 0.16);
+  --summary-signal-text: #78350f;
+  background:
+    linear-gradient(180deg, rgba(217, 119, 6, 0.2) 0%, rgba(217, 119, 6, 0.09) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #fffbeb;
+}
+
+.summary-card--then-red {
+  --summary-signal: #dc2626;
+  --summary-signal-soft: #fca5a5;
+  --summary-signal-border: #f87171;
+  --summary-signal-shadow: rgba(220, 38, 38, 0.16);
+  --summary-signal-text: #7f1d1d;
+  background:
+    linear-gradient(180deg, rgba(220, 38, 38, 0.18) 0%, rgba(220, 38, 38, 0.08) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #fef2f2;
 }
 
 .summary-card--editor {
@@ -902,6 +1189,8 @@ async function save(): Promise<void> {
   position: absolute;
   top: 10px;
   right: 14px;
+  z-index: 20;
+  overflow: visible;
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -918,13 +1207,14 @@ async function save(): Promise<void> {
   position: absolute;
   top: 30px;
   right: 0;
-  z-index: 5;
+  z-index: 40;
   width: min(280px, 60vw);
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-text);
-  color: #ffffff;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
   font-size: 12px;
   line-height: 1.4;
   text-align: left;
@@ -1012,15 +1302,97 @@ async function save(): Promise<void> {
 .summary-filter-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .summary-filter-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
   padding: 10px;
+  overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.summary-filter-row--nested {
+  background: var(--color-surface);
+}
+
+.summary-filter-condition-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.summary-filter-condition-field label {
+  grid-column: auto;
+}
+
+.summary-filter-row .form-field,
+.summary-filter-group .form-field {
+  min-width: 0;
+}
+
+.summary-filter-row :deep(.p-select),
+.summary-filter-row :deep(.p-inputtext),
+.summary-filter-group :deep(.p-select),
+.summary-filter-group :deep(.p-inputtext) {
+  width: 100%;
+  min-width: 0;
+}
+
+.summary-filter-row :deep(.p-button) {
+  width: 100%;
+  justify-content: center;
+}
+
+.summary-filter-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  background: #f8fbff;
+}
+
+.summary-filter-group__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.summary-filter-group__header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.summary-filter-group__header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (min-width: 640px) {
+  .summary-filter-condition-field {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  .summary-filter-condition-field label {
+    grid-column: 1 / -1;
+  }
+
+  .summary-filter-row :deep(.p-button) {
+    width: auto;
+  }
 }
 
 @media (max-width: 1280px) {

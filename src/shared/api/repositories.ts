@@ -13,7 +13,9 @@ import type {
   Attachment,
   AuditEvent,
   DashboardFilter,
+  DashboardFilterGroup,
   DashboardSummaryBlock,
+  DashboardThenAction,
   Dictionary,
   DictionaryItem,
   EntityObject,
@@ -60,6 +62,8 @@ const LEGACY_SUMMARY_WIDTHS: Record<string, number> = {
 type StoredSummaryBlock = Omit<DashboardSummaryBlock, 'widthPx'> & {
   widthPx?: number
   width?: keyof typeof LEGACY_SUMMARY_WIDTHS
+  thenAction?: DashboardThenAction
+  filterGroups?: DashboardFilterGroup[]
 }
 
 type StoredMapSettings = Partial<Omit<EntityMapSettings, 'styles'>> & {
@@ -1142,18 +1146,22 @@ function normalizeUserSettings(settings: UserSettings, db: AppDatabase): UserSet
       const schema = db.entitySchemas.find((candidate) => candidate.id === block.entityId)
       const fieldExists = Boolean(block.fieldCode && schema?.fields.some((field) => field.code === block.fieldCode))
       const fieldCode = block.metric === 'count' ? '' : fieldExists ? block.fieldCode : schema?.fields[0]?.code ?? ''
-      const filters = normalizeDashboardFilters(block.filters ?? [], schema)
+      const normalizedFilters = normalizeDashboardFilters(block.filters ?? [], schema).slice(0, 1)
+      const normalizedFilterGroups = normalizeDashboardFilterGroups(block.filterGroups ?? [], schema).slice(0, 1)
+      const filters = normalizedFilters
+      const filterGroups = filters.length > 0 ? [] : normalizedFilterGroups
       return {
         id: block.id || createId('sum'),
         entityId: block.entityId,
         fieldCode,
         metric: block.metric,
         title: String(block.title ?? '').trim() || defaultSummaryTitle(block, db),
-        showInfo: Boolean(String(block.description ?? '').trim() || filters.length),
+        showInfo: Boolean(String(block.description ?? '').trim() || filters.length || filterGroups.length),
         description: String(block.description ?? '').trim(),
         widthPx: normalizeSummaryWidth(block),
         order: index + 1,
         filters,
+        filterGroups,
       }
     })
 
@@ -1161,6 +1169,10 @@ function normalizeUserSettings(settings: UserSettings, db: AppDatabase): UserSet
     userId: settings.userId,
     home: { summaryBlocks: blocks },
   }
+}
+
+function normalizeDashboardThenAction(value: unknown): DashboardThenAction {
+  return value === 'green' || value === 'yellow' || value === 'red' ? value : 'none'
 }
 
 function normalizeSummaryWidth(block: StoredSummaryBlock): number {
@@ -1179,7 +1191,21 @@ function normalizeDashboardFilters(filters: DashboardFilter[], schema: EntitySch
       fieldCode: filterItem.fieldCode,
       operator: filterItem.operator,
       value: String(filterItem.value ?? ''),
+      thenAction: normalizeDashboardThenAction(filterItem.thenAction),
     }))
+}
+
+function normalizeDashboardFilterGroups(groups: DashboardFilterGroup[], schema: EntitySchema | undefined): DashboardFilterGroup[] {
+  return groups
+    .map((group) => ({
+      id: group.id || createId('fg'),
+      thenAction: normalizeDashboardThenAction(group.thenAction),
+      filters: normalizeDashboardFilters(group.filters ?? [], schema).map((filter) => ({
+        ...filter,
+        thenAction: 'none' as const,
+      })),
+    }))
+    .filter((group) => group.filters.length > 0)
 }
 
 function isValidDashboardFilterField(fieldCode: string, schema: EntitySchema | undefined): boolean {

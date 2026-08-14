@@ -253,6 +253,7 @@ export interface PlatformSettings {
 }
 
 export type SummaryMetric = 'count' | 'filled' | 'empty' | 'unique' | 'sum' | 'average'
+export type DashboardThenAction = 'none' | 'green' | 'yellow' | 'red'
 export type DashboardFilterOperator =
   | 'equals'
   | 'notEquals'
@@ -270,6 +271,13 @@ export interface DashboardFilter {
   fieldCode: string
   operator: DashboardFilterOperator
   value: string
+  thenAction?: DashboardThenAction
+}
+
+export interface DashboardFilterGroup {
+  id: string
+  filters: DashboardFilter[]
+  thenAction: DashboardThenAction
 }
 
 export interface DashboardSummaryBlock {
@@ -283,6 +291,7 @@ export interface DashboardSummaryBlock {
   widthPx: number
   order: number
   filters: DashboardFilter[]
+  filterGroups: DashboardFilterGroup[]
 }
 
 export interface UserHomeSettings {

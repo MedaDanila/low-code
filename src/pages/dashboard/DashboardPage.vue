@@ -10,8 +10,10 @@ import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import type {
   DashboardFilter,
+  DashboardFilterGroup,
   DashboardFilterOperator,
   DashboardSummaryBlock,
+  DashboardThenAction,
   EntityField,
   EntityObject,
   EntitySchema,
@@ -23,6 +25,7 @@ interface SummaryView {
   schema: EntitySchema
   title: string
   value: string
+  thenAction: DashboardThenAction
 }
 
 interface SummaryGroup {
@@ -70,6 +73,7 @@ const summaryGroups = computed<SummaryGroup[]>(() => {
       schema,
       title: block.title || defaultSummaryTitle(block, schema),
       value: calculateSummaryValue(block),
+      thenAction: summaryThenAction(block),
     })
   })
 
@@ -163,7 +167,7 @@ function clampSummaryWidth(block: DashboardSummaryBlock, widthPx: number): numbe
 }
 
 function hasSummaryInfo(block: DashboardSummaryBlock): boolean {
-  return Boolean(block.description?.trim() || block.filters?.length)
+  return Boolean(block.description?.trim() || block.filters?.length || block.filterGroups?.length)
 }
 
 function summaryInfoText(block: DashboardSummaryBlock): string {
@@ -176,33 +180,44 @@ function summaryFiltersDescription(block: DashboardSummaryBlock): string {
   const filters = (block.filters ?? [])
     .map((filter) => filterDescription(block, filter))
     .filter(Boolean)
+  const groups = (block.filterGroups ?? [])
+    .map((group, index) => {
+      const description = group.filters.map((filter) => filterDescription(block, filter)).filter(Boolean).join(' и ')
+      if (!description) return ''
+      const action = group.thenAction !== 'none' ? ` тогда ${thenActionLabel(group.thenAction).toLowerCase()}` : ''
+      return `группа ${index + 1}: ${description}${action}`
+    })
+    .filter(Boolean)
 
-  if (filters.length === 0) return ''
-  return `В расчёт попадают объекты, у которых ${filters.join(' и ')}.`
+  if (filters.length === 0 && groups.length === 0) return ''
+  return `Условия: ${[...filters, ...groups].join('; ')}.`
 }
 
 function filterDescription(block: DashboardSummaryBlock, filter: DashboardFilter): string {
   const fieldName = humanFieldName(block, filter.fieldCode)
   const value = humanFilterValue(block, filter)
   const kind = filterFieldKind(block, filter.fieldCode)
+  const action = filter.thenAction && filter.thenAction !== 'none'
+    ? ` тогда ${thenActionLabel(filter.thenAction).toLowerCase()}`
+    : ''
 
-  if (filter.operator === 'today') return `${fieldName} совпадает с текущей датой`
-  if (filter.operator === 'beforeToday') return `${fieldName} раньше текущей даты`
-  if (filter.operator === 'afterToday') return `${fieldName} позже текущей даты`
-  if (filter.operator === 'filled') return `${fieldName} заполнено`
-  if (filter.operator === 'empty') return `${fieldName} не заполнено`
-  if (filter.operator === 'contains') return value ? `${fieldName} содержит ${quoteValue(value)}` : `${fieldName} содержит заданное значение`
-  if (filter.operator === 'notEquals') return value ? `${fieldName} не имеет значение ${quoteValue(value)}` : `${fieldName} не равно заданному значению`
+  if (filter.operator === 'today') return `${fieldName} совпадает с текущей датой${action}`
+  if (filter.operator === 'beforeToday') return `${fieldName} раньше текущей даты${action}`
+  if (filter.operator === 'afterToday') return `${fieldName} позже текущей даты${action}`
+  if (filter.operator === 'filled') return `${fieldName} заполнено${action}`
+  if (filter.operator === 'empty') return `${fieldName} не заполнено${action}`
+  if (filter.operator === 'contains') return value ? `${fieldName} содержит ${quoteValue(value)}${action}` : `${fieldName} содержит заданное значение${action}`
+  if (filter.operator === 'notEquals') return value ? `${fieldName} не имеет значение ${quoteValue(value)}${action}` : `${fieldName} не равно заданному значению${action}`
 
   if (filter.operator === 'before') {
-    return value ? `${fieldName} ${kind === 'number' ? 'меньше' : 'раньше'} ${quoteValue(value)}` : `${fieldName} меньше заданного значения`
+    return value ? `${fieldName} ${kind === 'number' ? 'меньше' : 'раньше'} ${quoteValue(value)}${action}` : `${fieldName} меньше заданного значения${action}`
   }
 
   if (filter.operator === 'after') {
-    return value ? `${fieldName} ${kind === 'number' ? 'больше' : 'позже'} ${quoteValue(value)}` : `${fieldName} больше заданного значения`
+    return value ? `${fieldName} ${kind === 'number' ? 'больше' : 'позже'} ${quoteValue(value)}${action}` : `${fieldName} больше заданного значения${action}`
   }
 
-  return value ? `${fieldName} имеет значение ${quoteValue(value)}` : `${fieldName} равно заданному значению`
+  return value ? `${fieldName} имеет значение ${quoteValue(value)}${action}` : `${fieldName} равно заданному значению${action}`
 }
 
 function humanFieldName(block: DashboardSummaryBlock, fieldCode: string): string {
@@ -270,6 +285,43 @@ function needsFilterValue(operator: DashboardFilterOperator): boolean {
   return !['filled', 'empty', 'today', 'beforeToday', 'afterToday'].includes(operator)
 }
 
+function summaryThenAction(block: DashboardSummaryBlock): DashboardThenAction {
+  const actions = [
+    ...(block.filters ?? [])
+      .filter((filter) => filter.thenAction && filter.thenAction !== 'none' && filterMatchesAnyObject(block, filter))
+      .map((filter) => filter.thenAction ?? 'none'),
+    ...(block.filterGroups ?? [])
+      .filter((group) => group.thenAction !== 'none' && groupMatchesAnyObject(block, group))
+      .map((group) => group.thenAction),
+  ]
+
+  if (actions.includes('red')) return 'red'
+  if (actions.includes('yellow')) return 'yellow'
+  if (actions.includes('green')) return 'green'
+  return 'none'
+}
+
+function filterMatchesAnyObject(block: DashboardSummaryBlock, filter: DashboardFilter): boolean {
+  return platform.objectsByEntity(block.entityId).some((object) =>
+    matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
+  )
+}
+
+function groupMatchesAnyObject(block: DashboardSummaryBlock, group: DashboardFilterGroup): boolean {
+  return platform.objectsByEntity(block.entityId).some((object) =>
+    group.filters.every((filter) =>
+      matchesDashboardFilter(object, filter, filterFieldKind(block, filter.fieldCode)),
+    ),
+  )
+}
+
+function thenActionLabel(action: DashboardThenAction): string {
+  if (action === 'green') return 'Зелёный'
+  if (action === 'yellow') return 'Жёлтый'
+  if (action === 'red') return 'Красный'
+  return 'Ничего'
+}
+
 function quoteValue(value: string): string {
   return `«${value}»`
 }
@@ -316,7 +368,12 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
             v-for="summary in group.blocks"
             :key="summary.block.id"
             class="summary-card"
-            :class="{ 'summary-card--has-info': hasSummaryInfo(summary.block) }"
+            :class="{
+              'summary-card--has-info': hasSummaryInfo(summary.block),
+              'summary-card--then-green': summary.thenAction === 'green',
+              'summary-card--then-yellow': summary.thenAction === 'yellow',
+              'summary-card--then-red': summary.thenAction === 'red',
+            }"
             :style="summaryCardStyle(summary.block)"
           >
             <button
@@ -375,6 +432,7 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
 
 .summary-card {
   position: relative;
+  z-index: 0;
   flex: 0 0 var(--summary-width);
   width: var(--summary-width);
   max-width: 100%;
@@ -391,6 +449,74 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
   box-sizing: border-box;
 }
 
+.summary-card:hover,
+.summary-card:focus-within {
+  z-index: 30;
+}
+
+.summary-card--then-green,
+.summary-card--then-yellow,
+.summary-card--then-red {
+  border-color: var(--summary-signal-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 10px 24px var(--summary-signal-shadow);
+}
+
+.summary-card--then-green::before,
+.summary-card--then-yellow::before,
+.summary-card--then-red::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: linear-gradient(90deg, var(--summary-signal), var(--summary-signal-soft));
+  pointer-events: none;
+}
+
+.summary-card--then-green .summary-card__title,
+.summary-card--then-yellow .summary-card__title,
+.summary-card--then-red .summary-card__title,
+.summary-card--then-green strong,
+.summary-card--then-yellow strong,
+.summary-card--then-red strong {
+  color: var(--summary-signal-text);
+}
+
+.summary-card--then-green {
+  --summary-signal: #16a34a;
+  --summary-signal-soft: #86efac;
+  --summary-signal-border: #4ade80;
+  --summary-signal-shadow: rgba(22, 163, 74, 0.16);
+  --summary-signal-text: #14532d;
+  background:
+    linear-gradient(180deg, rgba(22, 163, 74, 0.18) 0%, rgba(22, 163, 74, 0.08) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #f0fdf4;
+}
+
+.summary-card--then-yellow {
+  --summary-signal: #d97706;
+  --summary-signal-soft: #fcd34d;
+  --summary-signal-border: #fbbf24;
+  --summary-signal-shadow: rgba(217, 119, 6, 0.16);
+  --summary-signal-text: #78350f;
+  background:
+    linear-gradient(180deg, rgba(217, 119, 6, 0.2) 0%, rgba(217, 119, 6, 0.09) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #fffbeb;
+}
+
+.summary-card--then-red {
+  --summary-signal: #dc2626;
+  --summary-signal-soft: #fca5a5;
+  --summary-signal-border: #f87171;
+  --summary-signal-shadow: rgba(220, 38, 38, 0.16);
+  --summary-signal-text: #7f1d1d;
+  background:
+    linear-gradient(180deg, rgba(220, 38, 38, 0.18) 0%, rgba(220, 38, 38, 0.08) 58%, rgba(255, 255, 255, 0.96) 100%),
+    #fef2f2;
+}
+
 .summary-card--has-info .summary-card__title {
   padding-right: 30px;
 }
@@ -399,6 +525,8 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
   position: absolute;
   top: 12px;
   right: 12px;
+  z-index: 20;
+  overflow: visible;
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -415,13 +543,14 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
   position: absolute;
   top: 30px;
   right: 0;
-  z-index: 5;
+  z-index: 40;
   width: min(280px, 60vw);
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-text);
-  color: #ffffff;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
   font-size: 12px;
   line-height: 1.4;
   text-align: left;
