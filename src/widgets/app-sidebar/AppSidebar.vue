@@ -51,6 +51,9 @@ const userSettingsItems = [
 ]
 
 const canOpenSystemSettings = computed(() => permissions.can('view'))
+const brandTitle = computed(() => platform.settings?.municipalityName?.trim() || 'Муниципалитет')
+const brandEyebrow = computed(() => platform.settings?.platformName?.trim() || 'Муниципальная платформа')
+const brandInitial = computed(() => firstBrandLetter(brandTitle.value || brandEyebrow.value))
 
 const runtimeEntityItems = computed(() =>
   platform.runtimeSchemas
@@ -61,14 +64,18 @@ const runtimeEntityItems = computed(() =>
       icon: schema.geometryType === 'point' ? MapPinned : GitBranch,
     })),
 )
+
+function firstBrandLetter(value: string): string {
+  return Array.from(value.trim()).find((char) => /[\p{L}\p{N}]/u.test(char))?.toLocaleUpperCase('ru-RU') ?? 'М'
+}
 </script>
 
 <template>
   <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
     <div class="sidebar__brand">
-      <p v-if="!collapsed" class="sidebar__eyebrow">{{ platform.settings?.platformName ?? 'Муниципальная платформа' }}</p>
-      <h1 v-if="!collapsed">{{ platform.settings?.municipalityName ?? 'Муниципалитет' }}</h1>
-      <span v-else aria-hidden="true">М</span>
+      <p v-if="!collapsed" class="sidebar__eyebrow">{{ brandEyebrow }}</p>
+      <h1 v-if="!collapsed">{{ brandTitle }}</h1>
+      <span v-else aria-hidden="true">{{ brandInitial }}</span>
     </div>
 
     <button

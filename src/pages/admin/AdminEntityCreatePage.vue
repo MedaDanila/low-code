@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, type Component } from 'vue'
-import { Baby, Check, ClipboardCheck, School, ToyBrick, Trees } from '@lucide/vue'
+import { Baby, Check, ClipboardCheck, FilePlus2, School, ToyBrick, Trees } from '@lucide/vue'
 import Checkbox from 'primevue/checkbox'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
@@ -13,6 +13,7 @@ import type { EntityField, EntityMapStyle, EntitySchema, FieldType, MapGeometryT
 
 type StepId = 'purpose' | 'fields' | 'map' | 'review'
 type TemplateId = 'education' | 'playgrounds' | 'kindergartens' | 'orders' | 'public-spaces'
+type CreateSourceId = TemplateId | 'scratch'
 
 interface StarterField {
   id: string
@@ -65,6 +66,24 @@ const templates: EntityTemplate[] = [
     ],
   },
   {
+    id: 'kindergartens',
+    title: 'Детские сады',
+    description: 'Дошкольные учреждения, количество мест, группы и контактные данные.',
+    icon: Baby,
+    exampleName: 'Детские сады',
+    exampleDescription: 'Реестр дошкольных учреждений с данными о вместимости и группах.',
+    geometryTypes: ['point', 'polygon'],
+    clusteringEnabled: true,
+    fields: [
+      starterField('Наименование', 'string', true),
+      starterField('Тип учреждения', 'string'),
+      starterField('Количество мест', 'integer'),
+      starterField('Количество групп', 'integer'),
+      starterField('Руководитель', 'string'),
+      starterField('Телефон', 'string'),
+    ],
+  },
+  {
     id: 'playgrounds',
     title: 'Детские площадки',
     description: 'Игровые зоны, оборудование, техническое состояние и балансодержатели.',
@@ -81,24 +100,6 @@ const templates: EntityTemplate[] = [
       starterField('Балансодержатель', 'string'),
       starterField('Год установки', 'integer'),
       starterField('Доступная среда', 'boolean', false, false),
-    ],
-  },
-  {
-    id: 'kindergartens',
-    title: 'Детские сады',
-    description: 'Дошкольные учреждения, количество мест, группы и контактные данные.',
-    icon: Baby,
-    exampleName: 'Детские сады',
-    exampleDescription: 'Реестр дошкольных учреждений с данными о вместимости и группах.',
-    geometryTypes: ['point', 'polygon'],
-    clusteringEnabled: true,
-    fields: [
-      starterField('Наименование', 'string', true),
-      starterField('Тип учреждения', 'string'),
-      starterField('Количество мест', 'integer'),
-      starterField('Количество групп', 'integer'),
-      starterField('Руководитель', 'string'),
-      starterField('Телефон', 'string'),
     ],
   },
   {
@@ -149,7 +150,6 @@ const fieldTypes: { label: string; value: FieldType }[] = [
   { label: 'Да/нет', value: 'boolean' },
   { label: 'Дата', value: 'date' },
   { label: 'Дата и время', value: 'datetime' },
-  { label: 'Адрес', value: 'address' },
 ]
 
 const geometryOptions: Array<{ label: string; value: MapGeometryType }> = [
@@ -165,7 +165,7 @@ const defaultGeometryStyles: Record<MapGeometryType, EntityMapStyle> = {
 }
 
 const activeStep = ref<StepId>('purpose')
-const selectedTemplateId = ref<TemplateId>('education')
+const selectedTemplateId = ref<CreateSourceId>('education')
 const entityName = ref('')
 const entityDescription = ref('')
 const geometryTypes = ref<MapGeometryType[]>([...templates[0].geometryTypes])
@@ -175,11 +175,22 @@ const validationMessage = ref('')
 const creating = ref(false)
 
 const selectedTemplate = computed(() => templates.find((template) => template.id === selectedTemplateId.value) ?? templates[0])
+const scratchSelected = computed(() => selectedTemplateId.value === 'scratch')
+const namePlaceholder = computed(() => (scratchSelected.value ? 'Например, Муниципальные объекты' : selectedTemplate.value.exampleName))
+const descriptionPlaceholder = computed(() => (
+  scratchSelected.value
+    ? 'Опишите, какие объекты будут храниться в этом разделе.'
+    : selectedTemplate.value.exampleDescription
+))
 const activeStepIndex = computed(() => steps.findIndex((step) => step.id === activeStep.value))
 const canCreate = computed(() => Boolean(entityName.value.trim()) && starterFieldsValid.value && geometryTypes.value.length > 0)
 const starterFieldsValid = computed(() => starterFields.value.every((field) => field.name.trim()))
 const totalFieldsCount = computed(() => starterFields.value.length + 1)
 const geometrySummary = computed(() => geometryTypes.value.map(geometryLabel).join(', '))
+const fieldsSummary = computed(() => {
+  const names = starterFields.value.map((field) => field.name).filter(Boolean)
+  return names.length ? `${totalFieldsCount.value} · Адрес, ${names.join(', ')}` : '1 · Адрес'
+})
 
 function starterField(
   name: string,
@@ -204,6 +215,16 @@ function selectTemplate(template: EntityTemplate): void {
   geometryTypes.value = [...template.geometryTypes]
   clusteringEnabled.value = template.clusteringEnabled
   starterFields.value = cloneTemplateFields(template)
+  validationMessage.value = ''
+}
+
+function selectScratch(): void {
+  selectedTemplateId.value = 'scratch'
+  if (!entityName.value.trim() || isTemplateExample(entityName.value, 'name')) entityName.value = ''
+  if (!entityDescription.value.trim() || isTemplateExample(entityDescription.value, 'description')) entityDescription.value = ''
+  geometryTypes.value = ['point']
+  clusteringEnabled.value = false
+  starterFields.value = []
   validationMessage.value = ''
 }
 
@@ -328,7 +349,7 @@ function createSchemaFields(schema: EntitySchema): EntityField[] {
       ...addressField,
       name: 'Адрес',
       type: 'address',
-      required: false,
+      required: true,
       listVisible: true,
       cardVisible: true,
       searchable: true,
@@ -385,9 +406,34 @@ function geometryLabel(type: MapGeometryType): string {
       <main class="panel create-main">
         <section v-if="activeStep === 'purpose'" class="create-section">
           <div class="section-heading">
-            <h3>Назначение сущности</h3>
-            <p>Выберите готовый сценарий — поля и настройки карты можно изменить на следующих шагах.</p>
+            <h3>С чего начать</h3>
+            <p>Возьмите готовую структуру для типового городского реестра или соберите раздел самостоятельно.</p>
           </div>
+
+          <button
+            type="button"
+            class="template-card template-card--scratch"
+            :class="{ active: scratchSelected }"
+            @click="selectScratch"
+          >
+            <span class="template-card__top">
+              <span class="template-card__icon" aria-hidden="true">
+                <FilePlus2 :size="20" />
+              </span>
+              <span v-if="scratchSelected" class="template-card__selected">
+                <Check :size="15" />
+                Выбрано
+              </span>
+            </span>
+            <span class="template-card__content">
+              <strong>Собрать самостоятельно</strong>
+              <span>Чистый раздел: по умолчанию присутствует адрес, а остальные поля вы добавите сами.</span>
+            </span>
+            <span class="template-card__meta">
+              <span>Точка по умолчанию</span>
+              <span>1 поле</span>
+            </span>
+          </button>
 
           <div class="template-grid">
             <button
@@ -421,33 +467,30 @@ function geometryLabel(type: MapGeometryType): string {
           <div class="form-grid create-form-grid">
             <div class="form-field">
               <label>Название</label>
-              <UiInput v-model="entityName" :placeholder="selectedTemplate.exampleName" />
+              <UiInput v-model="entityName" :placeholder="namePlaceholder" />
             </div>
             <div class="form-field full">
               <label>Описание</label>
-              <UiTextarea v-model="entityDescription" :placeholder="selectedTemplate.exampleDescription" :rows="3" />
+              <UiTextarea v-model="entityDescription" :placeholder="descriptionPlaceholder" :rows="3" />
             </div>
           </div>
         </section>
 
         <section v-else-if="activeStep === 'fields'" class="create-section">
-          <div class="section-heading section-heading--inline">
+          <div class="section-heading">
             <div>
               <h3>Стартовые поля</h3>
-              <p>Адрес добавляется автоматически. Остальные поля задают структуру реестра.</p>
+              <p>Поля задают структуру реестра. Их можно редактировать и дополнять.</p>
             </div>
-            <UiButton label="Добавить поле" icon="pi pi-plus" severity="secondary" variant="outlined" @click="addField" />
+          </div>
+
+          <div class="system-field-strip" aria-label="Системное поле">
+            <strong>Адрес</strong>
+            <span>Обязательное системное поле</span>
+            <small>В списке · в карточке · в поиске</small>
           </div>
 
           <div class="field-list">
-            <article class="field-item field-item--locked">
-              <div>
-                <strong>Адрес</strong>
-                <span>Автоматическое поле адреса</span>
-              </div>
-              <small>Адрес</small>
-            </article>
-
             <article v-for="field in starterFields" :key="field.id" class="field-item">
               <div class="field-item__controls">
                 <div class="form-field">
@@ -470,6 +513,13 @@ function geometryLabel(type: MapGeometryType): string {
               </div>
               <UiButton label="Удалить" severity="danger" variant="outlined" @click="deleteField(field.id)" />
             </article>
+            <button type="button" class="field-list__add" @click="addField">
+              <span class="field-list__add-icon">+</span>
+              <span>
+                <strong>Добавить поле</strong>
+                <small>Новое поле появится в конце структуры</small>
+              </span>
+            </button>
           </div>
         </section>
 
@@ -513,7 +563,7 @@ function geometryLabel(type: MapGeometryType): string {
             </div>
             <div>
               <dt>Поля</dt>
-              <dd>{{ totalFieldsCount }} · Адрес, {{ starterFields.map((field) => field.name).join(', ') }}</dd>
+              <dd>{{ fieldsSummary }}</dd>
             </div>
             <div>
               <dt>Геометрии</dt>
@@ -556,11 +606,7 @@ function geometryLabel(type: MapGeometryType): string {
         <h3>Итог</h3>
         <div class="summary-row">
           <span>Сущность</span>
-          <strong>{{ entityName || selectedTemplate.exampleName }}</strong>
-        </div>
-        <div class="summary-row">
-          <span>Шаблон</span>
-          <strong>{{ selectedTemplate.title }}</strong>
+          <strong>{{ entityName || namePlaceholder }}</strong>
         </div>
         <div class="summary-row">
           <span>Поля</span>
@@ -573,8 +619,8 @@ function geometryLabel(type: MapGeometryType): string {
         <div class="summary-fields">
           <span>Структура</span>
           <ul>
-            <li>Адрес</li>
-            <li v-for="field in starterFields.slice(0, 5)" :key="field.id">{{ field.name }} · {{ fieldTypeLabel(field.type) }}</li>
+            <li>Адрес · обязательное поле</li>
+            <li v-for="field in starterFields" :key="field.id">{{ field.name }} · {{ fieldTypeLabel(field.type) }}</li>
           </ul>
         </div>
       </aside>
@@ -701,6 +747,7 @@ function geometryLabel(type: MapGeometryType): string {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 12px;
+  width: 100%;
   min-height: 168px;
   padding: 16px;
   color: var(--color-text);
@@ -708,6 +755,10 @@ function geometryLabel(type: MapGeometryType): string {
   text-align: left;
   cursor: pointer;
   transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.template-card--scratch {
+  min-height: 132px;
 }
 
 .template-card:hover {
@@ -797,23 +848,83 @@ function geometryLabel(type: MapGeometryType): string {
   gap: 10px;
 }
 
+.field-list__add {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px 14px;
+  border: 1px dashed #bfdbfe;
+  border-radius: var(--radius-md);
+  background: rgba(37, 99, 235, 0.04);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.field-list__add:hover,
+.field-list__add:focus-visible {
+  border-color: #60a5fa;
+  background: rgba(37, 99, 235, 0.08);
+  outline: none;
+}
+
+.field-list__add-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.field-list__add span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.field-list__add small {
+  color: var(--color-text-secondary);
+}
+
+.system-field-strip {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px dashed #bfdbfe;
+  border-radius: var(--radius-md);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.system-field-strip strong {
+  color: var(--color-text);
+}
+
+.system-field-strip span,
+.system-field-strip small {
+  color: var(--color-text-secondary);
+}
+
+.system-field-strip small {
+  justify-self: end;
+  font-weight: 650;
+}
+
 .field-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
   padding: 12px;
-}
-
-.field-item--locked {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  background: var(--color-surface-muted);
-}
-
-.field-item--locked span,
-.field-item--locked small {
-  color: var(--color-text-secondary);
 }
 
 .field-item__controls {
@@ -943,10 +1054,15 @@ function geometryLabel(type: MapGeometryType): string {
   .create-stepper,
   .template-grid,
   .geometry-grid,
+  .system-field-strip,
   .field-item,
   .field-item__controls,
   .section-heading--inline {
     grid-template-columns: 1fr;
+  }
+
+  .system-field-strip small {
+    justify-self: start;
   }
 
   .template-card:last-child:nth-child(odd) {

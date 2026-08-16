@@ -54,6 +54,12 @@ async function archive(schema: EntitySchema) {
   toast.add({ severity: 'info', summary: 'Сущность архивирована', detail: schema.name, life: 2400 })
 }
 
+async function restore(schema: EntitySchema) {
+  openActionMenuId.value = ''
+  await platform.restoreSchema(schema.id)
+  toast.add({ severity: 'success', summary: 'Сущность восстановлена', detail: schema.name, life: 2400 })
+}
+
 async function remove(schema: EntitySchema) {
   openActionMenuId.value = ''
   const confirmed = window.confirm(`Удалить сущность «${schema.name}»? Это также удалит её объекты, справочники, задачи, слои и настройки.`)
@@ -117,7 +123,14 @@ function toggleActionMenu(schemaId: string, event: MouseEvent) {
               <div v-if="openActionMenuId === row.id" class="entity-actions__menu" :style="actionMenuStyle">
                 <button type="button" @click="open(row)">Открыть</button>
                 <button type="button" @click="duplicate(row.__schema as EntitySchema)">Дублировать</button>
-                <button type="button" @click="archive(row.__schema as EntitySchema)">Архивировать</button>
+                <button
+                  v-if="(row.__schema as EntitySchema).status === 'archived'"
+                  type="button"
+                  @click="restore(row.__schema as EntitySchema)"
+                >
+                  Восстановить
+                </button>
+                <button v-else type="button" @click="archive(row.__schema as EntitySchema)">Архивировать</button>
                 <button class="danger" type="button" @click="remove(row.__schema as EntitySchema)">Удалить</button>
               </div>
             </Teleport>

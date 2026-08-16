@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { formatDate, formatValue } from '../../shared/lib/format'
+import { formatDate, formatDateTime, formatValue } from '../../shared/lib/format'
 import { validateEntityObjectData } from '../../shared/lib/entityObjectValidation'
 import { usePlatformStore } from '../../stores/platform'
 import type { EntityObject, EntitySchema } from '../../shared/types/domain'
@@ -38,7 +38,11 @@ const rows = computed(() =>
       const rawValue = props.object.values[field.code]
       const dictionary = platform.dictionaryById(field.enumId)
       const enumLabel = dictionary?.items.find((item) => item.code === rawValue)?.name
-      const value = field.type === 'date' || field.type === 'datetime' ? formatDate(rawValue) : enumLabel ?? formatValue(rawValue)
+      const value = field.type === 'datetime' && typeof rawValue === 'string'
+        ? formatDateTime(rawValue)
+        : field.type === 'date'
+          ? formatDate(rawValue)
+          : enumLabel ?? formatValue(rawValue)
       return {
         key: field.code,
         label: field.name,

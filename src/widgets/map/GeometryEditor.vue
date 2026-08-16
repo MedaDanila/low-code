@@ -21,6 +21,7 @@ import { geocodeAddress } from '../../shared/api/dadata'
 import { findBuildingGeometryByCoordinates } from '../../shared/api/nominatim'
 import { MAP_CONFIG } from '../../shared/config/map'
 import { geometryCenter, geometryLengthMeters, polygonAreaSqMeters } from '../../shared/lib/geometry'
+import { usePlatformStore } from '../../stores/platform'
 import type { Coordinates, DomainGeometry, GeometryType, MapGeometryType } from '../../shared/types/domain'
 import { domainToFeature, olToDomainGeometry } from './olGeometry'
 
@@ -45,6 +46,7 @@ const emit = defineEmits<{
   'update:modelValue': [geometry: DomainGeometry | undefined]
 }>()
 
+const platform = usePlatformStore()
 const mapEl = ref<HTMLElement | null>(null)
 let map: Map | null = null
 let draw: Draw | null = null
@@ -106,8 +108,8 @@ onMounted(() => {
       }),
     ],
     view: new View({
-      center: fromLonLat(MAP_CONFIG.defaultCenter),
-      zoom: MAP_CONFIG.defaultZoom,
+      center: fromLonLat(platform.settings?.mapCenter ?? MAP_CONFIG.defaultCenter),
+      zoom: platform.settings?.mapZoom ?? MAP_CONFIG.defaultZoom,
     }),
   })
   map.on('singleclick', (event) => {
