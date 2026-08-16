@@ -216,9 +216,12 @@ export interface Attachment {
   objectId: string
   name: string
   type: string
+  mimeType?: string
   date: string
   authorId: string
   size: string
+  sizeBytes?: number
+  dataUrl?: string
 }
 
 export interface AuditEvent {

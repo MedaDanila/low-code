@@ -15,7 +15,7 @@ import { boundingExtent } from 'ol/extent'
 import type { FeatureLike } from 'ol/Feature'
 import type Geometry from 'ol/geom/Geometry'
 import { MAP_CONFIG } from '../../shared/config/map'
-import type { EntityMapColorRule, EntityMapStyle, EntityObject, EntitySchema, Layer, MapGeometryType, ObjectValue } from '../../shared/types/domain'
+import type { Coordinates, EntityMapColorRule, EntityMapStyle, EntityObject, EntitySchema, Layer, MapGeometryType, ObjectValue } from '../../shared/types/domain'
 import { domainToFeature } from './olGeometry'
 
 const props = withDefaults(
@@ -25,10 +25,16 @@ const props = withDefaults(
     objects: EntityObject[]
     visibleLayerIds: string[]
     selectedObjectId?: string
+    center?: Coordinates
+    zoom?: number
+    fitSingleObject?: boolean
     height?: string
   }>(),
   {
     selectedObjectId: '',
+    center: () => MAP_CONFIG.defaultCenter,
+    zoom: MAP_CONFIG.defaultZoom,
+    fitSingleObject: true,
     height: '520px',
   },
 )
@@ -55,8 +61,8 @@ onMounted(() => {
       new VectorLayer({ source: clusterSource, style: styleClusterFeature }),
     ],
     view: new View({
-      center: fromLonLat(MAP_CONFIG.defaultCenter),
-      zoom: MAP_CONFIG.defaultZoom,
+      center: fromLonLat(props.center),
+      zoom: props.zoom,
     }),
   })
   map.on('singleclick', (event) => {
@@ -84,6 +90,18 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => [props.center[0], props.center[1], props.zoom],
+  () => {
+    if (!map || props.selectedObjectId) return
+    map.getView().animate({
+      center: fromLonLat(props.center),
+      zoom: props.zoom,
+      duration: 220,
+    })
+  },
+)
+
 function renderFeatures() {
   source.clear()
   clusterRawSource.clear()
@@ -106,7 +124,7 @@ function renderFeatures() {
       source.addFeature(feature)
     }
   })
-  const targetFeature = selectedFeature ?? (props.objects.length === 1 ? fallbackFeature : null)
+  const targetFeature = selectedFeature ?? (props.fitSingleObject && props.objects.length === 1 ? fallbackFeature : null)
   if (targetFeature) requestAnimationFrame(() => fitFeature(targetFeature))
 }
 

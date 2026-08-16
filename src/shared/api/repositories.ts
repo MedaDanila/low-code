@@ -178,6 +178,20 @@ export const repositories = {
       await delay()
       return schema
     },
+    async restore(id: string) {
+      const db = readDb()
+      const schema = db.entitySchemas.find((item) => item.id === id)
+      if (!schema) throw new Error('Схема сущности не найдена')
+      schema.status = 'active'
+      schema.updatedAt = nowIso()
+      grantDefaultPermissions(db, schema.id)
+      ensureLayer(db, schema)
+      ensureWorkflow(db, schema)
+      syncLayerWithMapSettings(db, schema)
+      writeDb(db)
+      await delay()
+      return schema
+    },
     async duplicate(id: string) {
       const db = readDb()
       const source = db.entitySchemas.find((item) => item.id === id)
@@ -574,17 +588,32 @@ export const repositories = {
       await delay()
       return readDb().attachments.filter((item) => item.entityId === entityId && item.objectId === objectId)
     },
-    async add(entityId: string, objectId: string, actorId: string, name: string) {
+    async add(
+      entityId: string,
+      objectId: string,
+      actorId: string,
+      attachmentInput: {
+        name: string
+        type?: string
+        mimeType?: string
+        size?: string
+        sizeBytes?: number
+        dataUrl?: string
+      },
+    ) {
       const db = readDb()
       const attachment: Attachment = {
         id: createId('att'),
         entityId,
         objectId,
-        name,
-        type: name.split('.').pop()?.toUpperCase() ?? 'Файл',
+        name: attachmentInput.name,
+        type: attachmentInput.type ?? attachmentInput.name.split('.').pop()?.toUpperCase() ?? 'Файл',
+        mimeType: attachmentInput.mimeType,
         date: nowIso(),
         authorId: actorId,
-        size: '128 КБ',
+        size: attachmentInput.size ?? formatFileSize(attachmentInput.sizeBytes),
+        sizeBytes: attachmentInput.sizeBytes,
+        dataUrl: attachmentInput.dataUrl,
       }
       db.attachments.unshift(attachment)
       db.auditEvents.unshift({
@@ -594,7 +623,7 @@ export const repositories = {
         at: attachment.date,
         actorId,
         kind: 'document',
-        title: `Добавлен документ: ${name}`,
+        title: `Добавлен документ: ${attachment.name}`,
       })
       writeDb(db)
       await delay()
@@ -732,7 +761,6 @@ function migrateDb(db: AppDatabase): AppDatabase {
     settings: {
       ...settings,
       platformName: settings.platformName === 'Low-code GIS Platform' ? 'Муниципальная платформа' : settings.platformName,
-      municipalityName: settings.municipalityName === 'Нижний Новгород' ? 'Муниципалитет' : settings.municipalityName,
     },
     userSettings: db.userSettings ?? [],
   })
@@ -1319,4 +1347,11 @@ function ensureWorkflow(db: AppDatabase, schema: EntitySchema): void {
       validateGeoRules: false,
     },
   ]
+}
+
+function formatFileSize(sizeBytes: number | undefined): string {
+  if (!Number.isFinite(sizeBytes) || !sizeBytes) return '—'
+  if (sizeBytes < 1024) return `${sizeBytes} Б`
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} КБ`
+  return `${(sizeBytes / 1024 / 1024).toFixed(1).replace('.', ',')} МБ`
 }

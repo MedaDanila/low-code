@@ -124,6 +124,12 @@ export const usePlatformStore = defineStore('platform', () => {
     return schema
   }
 
+  async function restoreSchema(id: string): Promise<EntitySchema> {
+    const schema = await repositories.entitySchemas.restore(id)
+    await refresh()
+    return schema
+  }
+
   async function duplicateSchema(id: string): Promise<EntitySchema> {
     const schema = await repositories.entitySchemas.duplicate(id)
     await refresh()
@@ -237,8 +243,20 @@ export const usePlatformStore = defineStore('platform', () => {
     return saved
   }
 
-  async function addAttachment(entityId: string, objectId: string, actorId: string, name: string): Promise<void> {
-    await repositories.attachments.add(entityId, objectId, actorId, name)
+  async function addAttachment(
+    entityId: string,
+    objectId: string,
+    actorId: string,
+    attachment: {
+      name: string
+      type?: string
+      mimeType?: string
+      size?: string
+      sizeBytes?: number
+      dataUrl?: string
+    },
+  ): Promise<void> {
+    await repositories.attachments.add(entityId, objectId, actorId, attachment)
     await refresh()
   }
 
@@ -378,6 +396,7 @@ export const usePlatformStore = defineStore('platform', () => {
     saveSchema,
     publishSchema,
     archiveSchema,
+    restoreSchema,
     duplicateSchema,
     deleteSchema,
     createObject,

@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import UiButton from '../../shared/ui/UiButton.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
-import { formatDate, formatValue } from '../../shared/lib/format'
+import { formatDate, formatDateTime, formatValue } from '../../shared/lib/format'
 import { usePlatformStore } from '../../stores/platform'
 import MapCanvas from '../../widgets/map/MapCanvas.vue'
 import type { EntityField, EntityObject } from '../../shared/types/domain'
@@ -31,16 +31,6 @@ watch(
 )
 
 const selectedSchema = computed(() => (selectedObject.value ? platform.schemaById(selectedObject.value.entityId) : undefined))
-const selectedTitle = computed(() => {
-  if (!selectedObject.value) return ''
-  return String(
-    selectedObject.value.values.name
-    ?? selectedObject.value.values.title
-    ?? selectedObject.value.values.number
-    ?? selectedObject.value.values.address
-    ?? selectedObject.value.id,
-  )
-})
 const selectedRows = computed(() => {
   if (!selectedObject.value || !selectedSchema.value) return []
   return selectedSchema.value.fields
@@ -69,7 +59,8 @@ function openSelected() {
 function formattedFieldValue(object: EntityObject, field: EntityField): string {
   const raw = object.values[field.code]
   const enumLabel = platform.dictionaryById(field.enumId)?.items.find((item) => item.code === raw)?.name
-  return String(field.type === 'date' || field.type === 'datetime' ? formatDate(raw) : enumLabel ?? formatValue(raw))
+  if (field.type === 'datetime' && typeof raw === 'string') return formatDateTime(raw)
+  return String(field.type === 'date' ? formatDate(raw) : enumLabel ?? formatValue(raw))
 }
 </script>
 
@@ -98,6 +89,9 @@ function formattedFieldValue(object: EntityObject, field: EntityField): string {
         :objects="platform.entityObjects"
         :visible-layer-ids="visibleLayerIds"
         :selected-object-id="selectedObject?.id"
+        :center="platform.settings?.mapCenter"
+        :zoom="platform.settings?.mapZoom"
+        :fit-single-object="false"
         height="calc(100vh - 72px)"
         @select-object="selectedObject = $event"
       />
@@ -125,7 +119,6 @@ function formattedFieldValue(object: EntityObject, field: EntityField): string {
           <span>{{ selectedSchema.name }}</span>
           <button type="button" aria-label="Закрыть карточку объекта" @click="selectedObject = null">×</button>
         </div>
-        <strong>{{ selectedTitle }}</strong>
         <dl>
           <div v-for="row in selectedRows" :key="row.key">
             <dt>{{ row.label }}</dt>
@@ -303,12 +296,6 @@ function formattedFieldValue(object: EntityObject, field: EntityField): string {
   background: var(--color-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
-}
-
-.map-object-tooltip strong {
-  color: var(--color-text);
-  font-size: 15px;
-  line-height: 1.25;
 }
 
 .map-object-tooltip dl {

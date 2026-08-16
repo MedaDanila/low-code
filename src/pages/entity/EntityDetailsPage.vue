@@ -37,7 +37,7 @@ async function save(payload: EntityFormPayload) {
   try {
     const addressChanged = hasAddressChanged(schema.value, object.value.values, payload.values)
     const resolved = addressChanged
-      ? await resolveAddressGeometryForValues(schema.value, payload.values)
+      ? await resolveAddressGeometrySafely(schema.value, payload)
       : { values: payload.values, geometry: payload.geometry, status: '' }
     await platform.updateObject({
       id: object.value.id,
@@ -54,6 +54,22 @@ async function save(payload: EntityFormPayload) {
     })
   } finally {
     saving.value = false
+  }
+}
+
+async function resolveAddressGeometrySafely(
+  schema: EntitySchema,
+  payload: EntityFormPayload,
+): Promise<{ values: EntityFormPayload['values']; geometry?: EntityFormPayload['geometry']; status: string }> {
+  try {
+    return await resolveAddressGeometryForValues(schema, payload.values)
+  } catch (cause) {
+    if ((cause as DOMException).name === 'AbortError') throw cause
+    return {
+      values: payload.values,
+      geometry: payload.geometry,
+      status: 'Геокодер недоступен, адрес сохранён без обновления геометрии',
+    }
   }
 }
 

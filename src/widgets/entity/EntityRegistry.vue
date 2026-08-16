@@ -8,7 +8,7 @@ import UiInput from '../../shared/ui/UiInput.vue'
 import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTable from '../../shared/ui/UiTable.vue'
 import UiToolbar from '../../shared/ui/UiToolbar.vue'
-import { formatDate, formatValue } from '../../shared/lib/format'
+import { formatDate, formatDateTime, formatValue } from '../../shared/lib/format'
 import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { createId } from '../../shared/lib/id'
 import { usePermissions } from '../../shared/lib/usePermissions'
@@ -32,6 +32,12 @@ const filtersOpen = ref(false)
 const filters = ref<DashboardFilter[]>([])
 const openActionMenuId = ref('')
 const actionMenuStyle = ref<Record<string, string>>({})
+const searchInputId = computed(() => `registry-search-${props.schema.id}`)
+
+type ActiveCriteriaChip =
+  | { id: 'search'; label: string; kind: 'search' }
+  | { id: 'status'; label: string; kind: 'status' }
+  | { id: string; label: string; kind: 'filter'; filterId: string }
 
 const visibleFields = computed(() => props.schema.fields.filter((field) => field.listVisible).sort((a, b) => a.order - b.order))
 const filterableFields = computed(() => props.schema.fields.filter((field) => field.filterable).sort((a, b) => a.order - b.order))
@@ -80,6 +86,32 @@ const filteredObjects = computed(() =>
 )
 
 const rows = computed(() => filteredObjects.value.map((object) => objectToRow(object)))
+const resultSummary = computed(() => {
+  const total = props.objects.length
+  const found = filteredObjects.value.length
+  if (hasActiveCriteria.value) return `${found} из ${total} объектов`
+  return `${total} объектов`
+})
+const statusLabel = computed(() => statusOptions.find((option) => option.value === status.value)?.label ?? '')
+const activeCriteriaChips = computed<ActiveCriteriaChip[]>(() => {
+  const chips: ActiveCriteriaChip[] = []
+  const query = search.value.trim()
+  if (query) {
+    chips.push({ id: 'search', kind: 'search', label: `Поиск: ${query}` })
+  }
+  if (status.value !== 'all') {
+    chips.push({ id: 'status', kind: 'status', label: `Статус: ${statusLabel.value}` })
+  }
+  activeFilters.value.forEach((filter) => {
+    chips.push({
+      id: `filter-${filter.id}`,
+      kind: 'filter',
+      filterId: filter.id,
+      label: filterDescription(filter),
+    })
+  })
+  return chips
+})
 
 watch(
   () => props.schema.id,
@@ -137,7 +169,8 @@ function objectToRow(object: EntityObject): Record<string, unknown> {
 function formattedFieldValue(object: EntityObject, field: EntityField): string {
   const raw = object.values[field.code]
   const enumLabel = platform.dictionaryById(field.enumId)?.items.find((item) => item.code === raw)?.name
-  return String(field.type === 'date' || field.type === 'datetime' ? formatDate(raw) : enumLabel ?? formatValue(raw))
+  if (field.type === 'datetime' && typeof raw === 'string') return formatDateTime(raw)
+  return String(field.type === 'date' ? formatDate(raw) : enumLabel ?? formatValue(raw))
 }
 
 function addFilter(): void {
@@ -160,6 +193,32 @@ function removeFilter(filterId: string): void {
 
 function clearFilters(): void {
   filters.value = []
+}
+
+function clearSearch(): void {
+  search.value = ''
+}
+
+function clearStatus(): void {
+  status.value = 'all'
+}
+
+function clearAllCriteria(): void {
+  clearSearch()
+  clearStatus()
+  clearFilters()
+}
+
+function removeCriteriaChip(chip: ActiveCriteriaChip): void {
+  if (chip.kind === 'search') {
+    clearSearch()
+    return
+  }
+  if (chip.kind === 'status') {
+    clearStatus()
+    return
+  }
+  removeFilter(chip.filterId)
 }
 
 function updateFilterField(filter: DashboardFilter, value: string | number | boolean | null): void {
@@ -244,6 +303,18 @@ function filterValueOptions(filter: DashboardFilter): Array<{ label: string; val
   return []
 }
 
+function filterDescription(filter: DashboardFilter): string {
+  const field = props.schema.fields.find((item) => item.code === filter.fieldCode)
+  const fieldName = field?.name ?? 'Поле'
+  const operatorLabel = filterOperatorOptions(filter).find((option) => option.value === filter.operator)?.label ?? 'Условие'
+  if (!needsFilterValue(filter.operator)) return `${fieldName}: ${operatorLabel.toLowerCase()}`
+  return `${fieldName}: ${operatorLabel.toLowerCase()} ${humanFilterValue(filter)}`
+}
+
+function humanFilterValue(filter: DashboardFilter): string {
+  return filterValueOptions(filter).find((option) => option.value === filter.value)?.label ?? filter.value
+}
+
 function hasSelectValue(filter: DashboardFilter): boolean {
   return filterValueOptions(filter).length > 0
 }
@@ -314,27 +385,73 @@ function safeFileName(value: string): string {
 <template>
   <div class="registry">
     <UiToolbar class="registry-toolbar">
-      <div class="registry-toolbar__search">
-        <UiInput v-model="search" placeholder="Поиск по полям" />
+      <div class="registry-toolbar__content">
+        <div class="registry-toolbar__top">
+          <div class="registry-toolbar__primary">
+            <label class="registry-toolbar__label" :for="searchInputId">Поиск</label>
+            <div class="registry-toolbar__search">
+              <i class="pi pi-search registry-toolbar__search-icon" aria-hidden="true" />
+              <UiInput
+                :id="searchInputId"
+                v-model="search"
+                placeholder="Поиск по полям"
+              />
+              <button
+                v-if="search.trim()"
+                class="registry-toolbar__clear-search"
+                type="button"
+                aria-label="Очистить поиск"
+                @click="clearSearch"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div class="registry-toolbar__actions">
+            <UiButton
+              v-if="permissions.can('create', schema.id)"
+              label="Создать объект"
+              icon="pi pi-plus"
+              @click="createObject"
+            />
+            <UiButton label="Экспорт" icon="pi pi-download" severity="secondary" variant="outlined" @click="exportRows" />
+          </div>
+        </div>
+
+        <div class="registry-toolbar__bottom">
+          <span class="registry-toolbar__result" aria-live="polite">{{ resultSummary }}</span>
+          <div class="registry-toolbar__controls">
+            <UiSelect v-model="status" :options="statusOptions" />
+            <UiButton
+              class="registry-toolbar__filter-button"
+              :label="filterButtonLabel"
+              icon="pi pi-filter"
+              :severity="activeFilterCount > 0 ? undefined : 'secondary'"
+              :variant="activeFilterCount > 0 ? undefined : 'outlined'"
+              :disabled="filterableFields.length === 0"
+              @click="filtersOpen = !filtersOpen"
+            />
+          </div>
+        </div>
+
+        <div v-if="activeCriteriaChips.length > 0" class="registry-active-filters" aria-label="Применённые фильтры">
+          <span class="registry-active-filters__title">Применено</span>
+          <button
+            v-for="chip in activeCriteriaChips"
+            :key="chip.id"
+            class="registry-active-filters__chip"
+            type="button"
+            :aria-label="`Убрать ${chip.label}`"
+            @click="removeCriteriaChip(chip)"
+          >
+            <span>{{ chip.label }}</span>
+            <span aria-hidden="true">×</span>
+          </button>
+          <button class="registry-active-filters__reset" type="button" @click="clearAllCriteria">
+            Сбросить всё
+          </button>
+        </div>
       </div>
-      <UiSelect v-model="status" :options="statusOptions" />
-      <UiButton
-        :label="filterButtonLabel"
-        icon="pi pi-filter"
-        :severity="activeFilterCount > 0 ? undefined : 'secondary'"
-        :variant="activeFilterCount > 0 ? undefined : 'outlined'"
-        :disabled="filterableFields.length === 0"
-        @click="filtersOpen = !filtersOpen"
-      />
-      <template #actions>
-        <UiButton label="Экспорт" icon="pi pi-download" severity="secondary" variant="outlined" @click="exportRows" />
-        <UiButton
-          v-if="permissions.can('create', schema.id)"
-          :label="`Создать ${schema.name.toLowerCase()}`"
-          icon="pi pi-plus"
-          @click="createObject"
-        />
-      </template>
     </UiToolbar>
 
     <section v-if="filtersOpen" class="registry-filters">
@@ -446,21 +563,195 @@ function safeFileName(value: string): string {
 }
 
 .registry-toolbar :deep(.ui-toolbar__main) {
+  display: grid;
   flex: 1;
+  min-width: 0;
+  gap: 12px;
+}
+
+.registry-toolbar__content {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.registry-toolbar__top {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.registry-toolbar__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.registry-toolbar__primary {
+  display: flex;
+  align-items: center;
   min-width: 0;
 }
 
-.registry-toolbar :deep(.ui-toolbar__actions) {
-  margin-left: auto;
+.registry-toolbar__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .registry-toolbar__search {
-  min-width: min(340px, 100%);
-  flex: 1;
+  position: relative;
+  width: 100%;
+  min-width: 0;
 }
 
 .registry-toolbar__search :deep(.p-inputtext) {
   width: 100%;
+  padding-left: 38px;
+  padding-right: 34px;
+}
+
+.registry-toolbar__search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  z-index: 1;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transform: translateY(-50%);
+}
+
+.registry-toolbar__clear-search {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.registry-toolbar__clear-search:hover,
+.registry-toolbar__clear-search:focus-visible {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  outline: none;
+}
+
+.registry-toolbar__result {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.registry-toolbar__controls {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.registry-toolbar__controls :deep(.p-select) {
+  min-width: 164px;
+}
+
+.registry-toolbar__filter-button :deep(.p-button),
+.registry-toolbar__filter-button {
+  min-width: 122px;
+  white-space: nowrap;
+}
+
+.registry-toolbar__filter-button :deep(.p-button-label) {
+  overflow: visible;
+}
+
+.registry-toolbar__actions {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.registry-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.registry-active-filters__title {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.registry-active-filters__chip,
+.registry-active-filters__reset {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.registry-active-filters__chip {
+  padding: 0 10px 0 12px;
+}
+
+.registry-active-filters__chip:hover,
+.registry-active-filters__chip:focus-visible {
+  border-color: #bfdbfe;
+  background: var(--color-accent-soft);
+  outline: none;
+}
+
+.registry-active-filters__reset {
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.registry-active-filters__reset:hover,
+.registry-active-filters__reset:focus-visible {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  outline: none;
 }
 
 .registry-filters {
@@ -601,9 +892,36 @@ function safeFileName(value: string): string {
 }
 
 @media (max-width: 980px) {
-  .registry-toolbar :deep(.ui-toolbar__actions) {
+  .registry-toolbar {
+    align-items: stretch;
+  }
+
+  .registry-toolbar__top {
+    grid-template-columns: 1fr;
+  }
+
+  .registry-toolbar__bottom,
+  .registry-toolbar__primary,
+  .registry-toolbar__controls,
+  .registry-toolbar__actions {
+    flex-wrap: wrap;
     width: 100%;
-    margin-left: 0;
+  }
+
+  .registry-toolbar__bottom {
+    align-items: stretch;
+  }
+
+  .registry-toolbar__search,
+  .registry-toolbar__controls :deep(.p-select),
+  .registry-toolbar__controls :deep(.p-button),
+  .registry-toolbar__actions :deep(.p-button) {
+    width: 100%;
+  }
+
+  .registry-toolbar__result {
+    width: 100%;
+    text-align: center;
   }
 
   .registry-filter-row {
