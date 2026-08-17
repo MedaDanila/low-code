@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHashHistory, createWebHistory, type RouterHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import AppLayout from '../layouts/AppLayout.vue'
@@ -127,7 +127,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createRouterHistory(),
   routes,
 })
 
@@ -159,4 +159,10 @@ function hasSystemAccess(): boolean {
   return platform.roles
     .filter((role) => roleIds.includes(role.id))
     .some((role) => role.permissions.some((permission) => permission.system && permission.view))
+}
+
+function createRouterHistory(): RouterHistory {
+  return import.meta.env.VITE_ROUTER_MODE === 'hash'
+    ? createWebHashHistory(import.meta.env.BASE_URL)
+    : createWebHistory(import.meta.env.BASE_URL)
 }

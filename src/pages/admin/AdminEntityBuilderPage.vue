@@ -126,7 +126,7 @@ function withBuilderDefaults(schema: EntitySchema): EntitySchema {
   return {
     ...schema,
     mapSettings: schema.mapSettings ?? {
-      enabledGeometryTypes: schema.geometryType === 'none' ? ['point'] : [schema.geometryType],
+      enabledGeometryTypes: schema.geometryType === 'none' ? [] : [schema.geometryType],
       clusteringEnabled: false,
       styles: structuredClone(defaultGeometryStyles),
       colorRules: [],

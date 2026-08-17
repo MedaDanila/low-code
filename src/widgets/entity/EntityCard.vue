@@ -179,12 +179,12 @@ async function uploadAttachments(event: Event): Promise<void> {
       })
     }
   } catch {
-    toast.add({
-      severity: 'error',
-      summary: 'Не удалось загрузить файл',
-      detail: 'Проверьте размер файла: данные сохраняются в localStorage браузера.',
-      life: 4200,
-    })
+      toast.add({
+        severity: 'error',
+        summary: 'Не удалось загрузить файл',
+        detail: 'Проверьте размер файла: вложения сохраняются в локальную SQLite-базу проекта.',
+        life: 4200,
+      })
   } finally {
     if (fileInput.value) fileInput.value.value = ''
   }

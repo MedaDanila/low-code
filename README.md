@@ -19,7 +19,7 @@ UI не содержит отдельных `OrdersTable.vue`, `PlaygroundForm.v
 - PrimeVue / PrimeIcons
 - Lucide Vue
 - OpenLayers
-- LocalStorage-backed mock repositories
+- SQLite-backed runtime repositories
 
 ## Run
 
@@ -34,6 +34,28 @@ Useful checks:
 npm run typecheck
 npm run build
 ```
+
+## GitHub Pages
+
+Проект подготовлен для публикации из репозитория `low-code` через GitHub Actions.
+
+Локальная проверка production-сборки для Pages:
+
+```bash
+npm run build:pages
+```
+
+Что настроено:
+
+- base path для ассетов: `/low-code/`;
+- hash-router, чтобы вложенные страницы открывались на GitHub Pages без серверного роутинга;
+- статический режим хранения данных через `localStorage`;
+- workflow `.github/workflows/pages.yml`;
+- `public/.nojekyll`, чтобы GitHub Pages не обрабатывал `dist` через Jekyll.
+
+В GitHub нужно открыть `Settings -> Pages` и выбрать source `GitHub Actions`.
+
+Важно: GitHub Pages является статическим хостингом. SQLite и dev API `/api/v1/...` работают в режиме `npm run dev`; на Pages пользовательские данные сохраняются в браузере через `localStorage`.
 
 ## Demo Accounts
 
@@ -115,7 +137,7 @@ src/
 - `Attachment`
 - `AuditEvent`
 
-`src/shared/api/repositories.ts` defines the repository/service abstraction. UI components do not talk to `localStorage` directly. Replacing mock data with backend API should be done by swapping repository implementations while keeping store and component contracts stable.
+`src/shared/api/repositories.ts` defines the repository/service abstraction. UI components do not talk to storage directly. Replacing local runtime data with backend API should be done by swapping repository implementation internals while keeping store and component contracts stable.
 
 ## Metadata-Driven UI
 
@@ -224,18 +246,23 @@ Orders.geometry INTERSECTS WarrantyAreas.geometry -> ERROR
 
 The geometry engine currently uses simple bbox/intersection and distance checks suitable for frontend MVP validation. Production should delegate authoritative topology to backend GIS services such as PostGIS.
 
-## Mock Repository Layer
+## SQLite Repository Layer
 
-The mock data layer lives in:
+The local runtime data layer lives in:
 
 - `src/shared/api/seed.ts`
 - `src/shared/api/repositories.ts`
+- `dev-server/sqliteDatabase.ts`
 
-Data is stored in `localStorage` under:
+Data is stored in SQLite at:
 
 ```text
-low-code-gis-platform-db-v1
+.data/low-code.sqlite
 ```
+
+Legacy browser `localStorage` data under `low-code-gis-platform-db-v1` is imported into SQLite once when the app first connects to the Vite runtime API.
+
+For GitHub Pages builds, `VITE_STATIC_STORAGE=true` switches repositories back to browser `localStorage`, because static hosting cannot run the Vite SQLite middleware.
 
 Every repository call has a 220-480ms artificial delay to exercise loading states.
 

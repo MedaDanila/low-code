@@ -1,7 +1,7 @@
 import type { ObjectValue } from '../types/domain'
 
-const STORAGE_KEY = 'low-code-gis-platform-db-v1'
 const DEFAULT_DATE_TIME_FORMAT = 'dd.MM.yyyy HH:mm'
+let currentDateTimeFormat = DEFAULT_DATE_TIME_FORMAT
 
 export function formatDate(value: ObjectValue): string {
   if (typeof value !== 'string' || !value) return '—'
@@ -20,15 +20,12 @@ export function formatValue(value: ObjectValue): string {
   return String(value)
 }
 
+export function setPlatformDateTimeFormat(format?: string): void {
+  currentDateTimeFormat = format || DEFAULT_DATE_TIME_FORMAT
+}
+
 function platformDateTimeFormat(): string {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_DATE_TIME_FORMAT
-    const parsed = JSON.parse(raw) as { settings?: { dateTimeFormat?: string } }
-    return parsed.settings?.dateTimeFormat || DEFAULT_DATE_TIME_FORMAT
-  } catch {
-    return DEFAULT_DATE_TIME_FORMAT
-  }
+  return currentDateTimeFormat
 }
 
 function dateTemplateFromSettings(): string {

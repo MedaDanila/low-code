@@ -170,6 +170,7 @@ const entityName = ref('')
 const entityDescription = ref('')
 const geometryTypes = ref<MapGeometryType[]>([...templates[0].geometryTypes])
 const clusteringEnabled = ref(templates[0].clusteringEnabled)
+const addressEnabled = ref(true)
 const starterFields = ref<StarterField[]>(cloneTemplateFields(templates[0]))
 const validationMessage = ref('')
 const creating = ref(false)
@@ -183,13 +184,16 @@ const descriptionPlaceholder = computed(() => (
     : selectedTemplate.value.exampleDescription
 ))
 const activeStepIndex = computed(() => steps.findIndex((step) => step.id === activeStep.value))
-const canCreate = computed(() => Boolean(entityName.value.trim()) && starterFieldsValid.value && geometryTypes.value.length > 0)
+const canCreate = computed(() => Boolean(entityName.value.trim()) && starterFieldsValid.value)
 const starterFieldsValid = computed(() => starterFields.value.every((field) => field.name.trim()))
-const totalFieldsCount = computed(() => starterFields.value.length + 1)
-const geometrySummary = computed(() => geometryTypes.value.map(geometryLabel).join(', '))
+const totalFieldsCount = computed(() => starterFields.value.length + (addressEnabled.value ? 1 : 0))
+const mapEnabled = computed(() => geometryTypes.value.length > 0)
+const geometrySummary = computed(() => (mapEnabled.value ? geometryTypes.value.map(geometryLabel).join(', ') : 'Без карты'))
 const fieldsSummary = computed(() => {
   const names = starterFields.value.map((field) => field.name).filter(Boolean)
-  return names.length ? `${totalFieldsCount.value} · Адрес, ${names.join(', ')}` : '1 · Адрес'
+  const fieldNames = addressEnabled.value ? ['Адрес', ...names] : names
+  if (fieldNames.length === 0) return 'Поля будут добавлены позже'
+  return `${totalFieldsCount.value} · ${fieldNames.join(', ')}`
 })
 
 function starterField(
@@ -214,6 +218,7 @@ function selectTemplate(template: EntityTemplate): void {
   }
   geometryTypes.value = [...template.geometryTypes]
   clusteringEnabled.value = template.clusteringEnabled
+  addressEnabled.value = true
   starterFields.value = cloneTemplateFields(template)
   validationMessage.value = ''
 }
@@ -222,8 +227,9 @@ function selectScratch(): void {
   selectedTemplateId.value = 'scratch'
   if (!entityName.value.trim() || isTemplateExample(entityName.value, 'name')) entityName.value = ''
   if (!entityDescription.value.trim() || isTemplateExample(entityDescription.value, 'description')) entityDescription.value = ''
-  geometryTypes.value = ['point']
+  geometryTypes.value = []
   clusteringEnabled.value = false
+  addressEnabled.value = false
   starterFields.value = []
   validationMessage.value = ''
 }
@@ -268,14 +274,13 @@ function isStepReady(stepId: StepId): boolean {
 function isStepComplete(stepId: StepId): boolean {
   if (stepId === 'purpose') return Boolean(entityName.value.trim())
   if (stepId === 'fields') return starterFieldsValid.value
-  if (stepId === 'map') return geometryTypes.value.length > 0
+  if (stepId === 'map') return true
   return canCreate.value
 }
 
 function stepErrorMessage(stepId: StepId): string {
   if (stepId === 'purpose') return 'Укажите название сущности.'
   if (stepId === 'fields') return 'Заполните названия всех стартовых полей.'
-  if (stepId === 'map') return 'Выберите хотя бы один тип геометрии.'
   return 'Заполните обязательные параметры перед созданием.'
 }
 
@@ -289,6 +294,16 @@ function toggleGeometry(type: MapGeometryType, checked: boolean): void {
   if (checked) current.add(type)
   else current.delete(type)
   geometryTypes.value = Array.from(current)
+  if (geometryTypes.value.length === 0) clusteringEnabled.value = false
+}
+
+function enableMap(): void {
+  if (geometryTypes.value.length === 0) geometryTypes.value = ['point']
+}
+
+function disableMap(): void {
+  geometryTypes.value = []
+  clusteringEnabled.value = false
 }
 
 function addField(): void {
@@ -320,16 +335,17 @@ async function createEntity(): Promise<void> {
     const schema = await platform.createSchema({
       name: entityName.value.trim(),
       description: entityDescription.value.trim(),
-      geometryType: geometryTypes.value[0],
+      geometryType: geometryTypes.value[0] ?? 'none',
+      includeAddress: addressEnabled.value,
     })
     const preparedSchema: EntitySchema = {
       ...schema,
       name: entityName.value.trim(),
       description: entityDescription.value.trim(),
-      geometryType: geometryTypes.value[0],
+      geometryType: geometryTypes.value[0] ?? 'none',
       mapSettings: {
         enabledGeometryTypes: geometryTypes.value,
-        clusteringEnabled: clusteringEnabled.value,
+        clusteringEnabled: mapEnabled.value && clusteringEnabled.value,
         styles: structuredClone(defaultGeometryStyles),
         colorRules: [],
       },
@@ -344,20 +360,23 @@ async function createEntity(): Promise<void> {
 
 function createSchemaFields(schema: EntitySchema): EntityField[] {
   const addressField = schema.fields.find((field) => field.type === 'address') ?? platform.createEmptyField(1)
+  const firstStarterFieldOrder = addressEnabled.value ? 2 : 1
   return [
-    {
-      ...addressField,
-      name: 'Адрес',
-      type: 'address',
-      required: true,
-      listVisible: true,
-      cardVisible: true,
-      searchable: true,
-      filterable: true,
-      order: 1,
-    },
+    ...(addressEnabled.value
+      ? [{
+          ...addressField,
+          name: 'Адрес',
+          type: 'address' as const,
+          required: false,
+          listVisible: true,
+          cardVisible: true,
+          searchable: true,
+          filterable: true,
+          order: 1,
+        }]
+      : []),
     ...starterFields.value.map((field, index) => ({
-      ...platform.createEmptyField(index + 2),
+      ...platform.createEmptyField(index + firstStarterFieldOrder),
       name: field.name.trim(),
       type: field.type,
       required: field.required,
@@ -365,7 +384,7 @@ function createSchemaFields(schema: EntitySchema): EntityField[] {
       cardVisible: field.cardVisible,
       searchable: true,
       filterable: true,
-      order: index + 2,
+      order: index + firstStarterFieldOrder,
     })),
   ]
 }
@@ -427,11 +446,11 @@ function geometryLabel(type: MapGeometryType): string {
             </span>
             <span class="template-card__content">
               <strong>Собрать самостоятельно</strong>
-              <span>Чистый раздел: по умолчанию присутствует адрес, а остальные поля вы добавите сами.</span>
+              <span>Чистый раздел без предустановленного адреса, карты и стартовых полей.</span>
             </span>
             <span class="template-card__meta">
-              <span>Точка по умолчанию</span>
-              <span>1 поле</span>
+              <span>Без карты</span>
+              <span>0 полей</span>
             </span>
           </button>
 
@@ -480,14 +499,15 @@ function geometryLabel(type: MapGeometryType): string {
           <div class="section-heading">
             <div>
               <h3>Стартовые поля</h3>
-              <p>Поля задают структуру реестра. Их можно редактировать и дополнять.</p>
+              <p>Поля задают структуру реестра. Адрес можно добавить как обычное стартовое поле или пропустить.</p>
             </div>
           </div>
 
-          <div class="system-field-strip" aria-label="Системное поле">
+          <div class="system-field-strip" :class="{ muted: !addressEnabled }" aria-label="Адресное поле">
+            <Checkbox v-model="addressEnabled" binary />
             <strong>Адрес</strong>
-            <span>Обязательное системное поле</span>
-            <small>В списке · в карточке · в поиске</small>
+            <span>{{ addressEnabled ? 'Будет добавлен как необязательное поле' : 'Не будет добавлен в сущность' }}</span>
+            <small>{{ addressEnabled ? 'В списке · в карточке · в поиске' : 'Можно добавить позже' }}</small>
           </div>
 
           <div class="field-list">
@@ -526,10 +546,21 @@ function geometryLabel(type: MapGeometryType): string {
         <section v-else-if="activeStep === 'map'" class="create-section">
           <div class="section-heading">
             <h3>Карта</h3>
-            <p>Типы геометрий объектов этой сущности.</p>
+            <p>Сущность может работать без карты. Если карта нужна, выберите доступные типы геометрии.</p>
           </div>
 
-          <div class="geometry-grid">
+          <div class="map-mode-grid">
+            <button type="button" class="map-mode-card" :class="{ active: !mapEnabled }" @click="disableMap">
+              <strong>Без карты</strong>
+              <span>Объекты будут хранить только поля и не потребуют адрес или геометрию.</span>
+            </button>
+            <button type="button" class="map-mode-card" :class="{ active: mapEnabled }" @click="enableMap">
+              <strong>Использовать карту</strong>
+              <span>Для объектов можно будет рисовать или определять геометрию.</span>
+            </button>
+          </div>
+
+          <div v-if="mapEnabled" class="geometry-grid">
             <label v-for="option in geometryOptions" :key="option.value" class="geometry-card" :class="{ active: geometryTypes.includes(option.value) }">
               <Checkbox
                 :model-value="geometryTypes.includes(option.value)"
@@ -540,7 +571,7 @@ function geometryLabel(type: MapGeometryType): string {
             </label>
           </div>
 
-          <label class="cluster-toggle">
+          <label v-if="mapEnabled" class="cluster-toggle">
             <Checkbox v-model="clusteringEnabled" binary />
             <span>Кластеризация для плотных наборов объектов</span>
           </label>
@@ -567,11 +598,11 @@ function geometryLabel(type: MapGeometryType): string {
             </div>
             <div>
               <dt>Геометрии</dt>
-              <dd>{{ geometrySummary || 'Не выбраны' }}</dd>
+              <dd>{{ geometrySummary }}</dd>
             </div>
             <div>
               <dt>Кластеризация</dt>
-              <dd>{{ clusteringEnabled ? 'Включена' : 'Выключена' }}</dd>
+              <dd>{{ mapEnabled ? (clusteringEnabled ? 'Включена' : 'Выключена') : 'Не используется' }}</dd>
             </div>
           </dl>
         </section>
@@ -614,13 +645,14 @@ function geometryLabel(type: MapGeometryType): string {
         </div>
         <div class="summary-row">
           <span>Карта</span>
-          <strong>{{ geometrySummary || 'Не выбрана' }}</strong>
+          <strong>{{ geometrySummary }}</strong>
         </div>
         <div class="summary-fields">
           <span>Структура</span>
           <ul>
-            <li>Адрес · обязательное поле</li>
+            <li v-if="addressEnabled">Адрес · необязательное поле</li>
             <li v-for="field in starterFields" :key="field.id">{{ field.name }} · {{ fieldTypeLabel(field.type) }}</li>
+            <li v-if="!addressEnabled && starterFields.length === 0">Поля будут добавлены позже</li>
           </ul>
         </div>
       </aside>
@@ -736,6 +768,7 @@ function geometryLabel(type: MapGeometryType): string {
 
 .template-card,
 .geometry-card,
+.map-mode-card,
 .field-item,
 .create-summary {
   border: 1px solid var(--color-border);
@@ -829,7 +862,8 @@ function geometryLabel(type: MapGeometryType): string {
 }
 
 .template-card.active,
-.geometry-card.active {
+.geometry-card.active,
+.map-mode-card.active {
   border-color: #93c5fd;
   background: rgba(37, 99, 235, 0.08);
 }
@@ -896,13 +930,18 @@ function geometryLabel(type: MapGeometryType): string {
 
 .system-field-strip {
   display: grid;
-  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(80px, auto) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
   border: 1px dashed #bfdbfe;
   border-radius: var(--radius-md);
   background: rgba(37, 99, 235, 0.05);
+}
+
+.system-field-strip.muted {
+  border-color: var(--color-border);
+  background: var(--color-surface-muted);
 }
 
 .system-field-strip strong {
@@ -947,6 +986,35 @@ function geometryLabel(type: MapGeometryType): string {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+}
+
+.map-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.map-mode-card {
+  display: grid;
+  gap: 6px;
+  min-height: 88px;
+  padding: 14px;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.map-mode-card:hover,
+.map-mode-card:focus-visible {
+  border-color: #bfdbfe;
+  background: var(--color-surface-muted);
+  outline: none;
+}
+
+.map-mode-card span {
+  color: var(--color-text-secondary);
+  line-height: 1.4;
 }
 
 .geometry-grid {

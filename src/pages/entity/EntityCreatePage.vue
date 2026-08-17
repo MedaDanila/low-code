@@ -5,11 +5,12 @@ import { useRoute, useRouter } from 'vue-router'
 import UiDialog from '../../shared/ui/UiDialog.vue'
 import UiEmptyState from '../../shared/ui/UiEmptyState.vue'
 import UiPageHeader from '../../shared/ui/UiPageHeader.vue'
+import { resolveAddressGeometryForValues } from '../../shared/lib/addressGeometry'
 import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
 import EntityForm from '../../widgets/entity/EntityForm.vue'
 import GeoValidationResult from '../../widgets/geo/GeoValidationResult.vue'
-import type { DomainGeometry, EntityObject, GeoValidationResult as GeoValidationResultType } from '../../shared/types/domain'
+import type { DomainGeometry, EntityObject, EntitySchema, GeoValidationResult as GeoValidationResultType } from '../../shared/types/domain'
 import type { EntityFormPayload } from '../../widgets/entity/types'
 
 const route = useRoute()
@@ -29,17 +30,53 @@ async function submit(payload: EntityFormPayload) {
   if (!schema.value || !auth.currentUser) return
   saving.value = true
   try {
+    const resolved = await resolveAddressGeometrySafely(schema.value, payload)
     const object = await platform.createObject({
       entityId: schema.value.id,
-      values: payload.values,
-      geometry: payload.geometry,
+      values: resolved.values,
+      geometry: resolved.geometry,
       actorId: auth.currentUser.id,
     })
-    toast.add({ severity: 'success', summary: 'Объект создан', detail: schema.value.name, life: 2400 })
+    toast.add({
+      severity: 'success',
+      summary: 'Объект создан',
+      detail: resolved.status || schema.value.name,
+      life: 2800,
+    })
     router.push(`/app/entities/${schema.value.code}/${object.id}`)
   } finally {
     saving.value = false
   }
+}
+
+async function resolveAddressGeometrySafely(
+  schema: EntitySchema,
+  payload: EntityFormPayload,
+): Promise<{ values: EntityFormPayload['values']; geometry?: EntityFormPayload['geometry']; status: string }> {
+  if (payload.geometry || !schemaHasMap(schema) || !hasAddressValue(schema, payload)) {
+    return { values: payload.values, geometry: payload.geometry, status: '' }
+  }
+
+  try {
+    return await resolveAddressGeometryForValues(schema, payload.values)
+  } catch (cause) {
+    if ((cause as DOMException).name === 'AbortError') throw cause
+    return {
+      values: payload.values,
+      geometry: payload.geometry,
+      status: 'Геокодер недоступен, адрес сохранён без геометрии',
+    }
+  }
+}
+
+function schemaHasMap(schema: EntitySchema): boolean {
+  return schema.geometryType !== 'none' || schema.mapSettings.enabledGeometryTypes.length > 0
+}
+
+function hasAddressValue(schema: EntitySchema, payload: EntityFormPayload): boolean {
+  return schema.fields
+    .filter((field) => field.type === 'address')
+    .some((field) => typeof payload.values[field.code] === 'string' && String(payload.values[field.code]).trim())
 }
 
 async function validate(payload: EntityFormPayload) {

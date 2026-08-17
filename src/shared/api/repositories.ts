@@ -37,6 +37,9 @@ import type {
 import { createSeedDatabase } from './seed'
 
 const STORAGE_KEY = 'low-code-gis-platform-db-v1'
+const SQLITE_MIGRATION_KEY = `${STORAGE_KEY}-sqlite-migrated-v1`
+const SQLITE_DATABASE_ENDPOINT = '/api/v1/__runtime/database'
+const STATIC_STORAGE_ENABLED = import.meta.env.VITE_STATIC_STORAGE === 'true'
 const latencyRange = [220, 480] as const
 const SUMMARY_WIDTH_STEP_PX = 10
 const SUMMARY_DEFAULT_WIDTH_PX = 220
@@ -76,6 +79,7 @@ export interface CreateEntitySchemaInput {
   code?: string
   description?: string
   geometryType?: GeometryType
+  includeAddress?: boolean
 }
 
 export interface CreateEntityObjectInput {
@@ -96,7 +100,7 @@ export interface UpdateEntityObjectInput {
 export const repositories = {
   database: {
     async reset() {
-      writeDb(createSeedDatabase())
+      await writeDb(createSeedDatabase())
       await delay()
       return readDb()
     },
@@ -109,54 +113,54 @@ export const repositories = {
   entitySchemas: {
     async list() {
       await delay()
-      return readDb().entitySchemas
+      return (await readDb()).entitySchemas
     },
     async listActive() {
       await delay()
-      return readDb().entitySchemas.filter((schema) => schema.status === 'active')
+      return (await readDb()).entitySchemas.filter((schema) => schema.status === 'active')
     },
     async getById(id: string) {
       await delay()
-      return readDb().entitySchemas.find((schema) => schema.id === id)
+      return (await readDb()).entitySchemas.find((schema) => schema.id === id)
     },
     async getByCode(code: string) {
       await delay()
-      return readDb().entitySchemas.find((schema) => schema.code === code)
+      return (await readDb()).entitySchemas.find((schema) => schema.code === code)
     },
     async create(input: CreateEntitySchemaInput) {
-      const db = readDb()
+      const db = await readDb()
       const timestamp = nowIso()
       const schema: EntitySchema = {
         id: createId('ent'),
         code: uniqueSystemCode(input.name, db.entitySchemas.map((item) => item.code), 'entity'),
         name: input.name,
         description: input.description,
-        geometryType: input.geometryType ?? 'point',
-        mapSettings: defaultMapSettings(),
-        fields: [defaultAddressField()],
+        geometryType: input.geometryType ?? 'none',
+        mapSettings: defaultMapSettings(input.geometryType ?? 'none'),
+        fields: input.includeAddress === false ? [] : [defaultAddressField()],
         status: 'draft',
         createdAt: timestamp,
         updatedAt: timestamp,
       }
       db.entitySchemas.push(schema)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return schema
     },
     async save(schema: EntitySchema) {
-      const db = readDb()
+      const db = await readDb()
       const existing = db.entitySchemas.find((item) => item.id === schema.id)
       const { schema: normalized, fieldCodeChanges } = normalizeEntitySchema(schema, existing, db)
       const updated: EntitySchema = { ...normalized, updatedAt: nowIso() }
       migrateEntityObjectFieldCodes(db, updated.id, fieldCodeChanges)
       db.entitySchemas = db.entitySchemas.map((item) => (item.id === schema.id ? updated : item))
       syncLayerWithMapSettings(db, updated)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return updated
     },
     async publish(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
       if (!schema) throw new Error('Схема сущности не найдена')
       schema.status = 'active'
@@ -164,22 +168,22 @@ export const repositories = {
       grantDefaultPermissions(db, schema.id)
       ensureLayer(db, schema)
       ensureWorkflow(db, schema)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return schema
     },
     async archive(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
       if (!schema) throw new Error('Схема сущности не найдена')
       schema.status = 'archived'
       schema.updatedAt = nowIso()
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return schema
     },
     async restore(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
       if (!schema) throw new Error('Схема сущности не найдена')
       schema.status = 'active'
@@ -188,12 +192,12 @@ export const repositories = {
       ensureLayer(db, schema)
       ensureWorkflow(db, schema)
       syncLayerWithMapSettings(db, schema)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return schema
     },
     async duplicate(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const source = db.entitySchemas.find((item) => item.id === id)
       if (!source) throw new Error('Схема сущности не найдена')
       const timestamp = nowIso()
@@ -209,12 +213,12 @@ export const repositories = {
       }
       copy.fields = normalizeFields(copy.fields)
       db.entitySchemas.push(copy)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return copy
     },
     async delete(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const schema = db.entitySchemas.find((item) => item.id === id)
       if (!schema) throw new Error('Схема сущности не найдена')
 
@@ -238,7 +242,7 @@ export const repositories = {
         },
       }))
 
-      writeDb(db)
+      await writeDb(db)
       await delay()
     },
   },
@@ -246,18 +250,18 @@ export const repositories = {
   entityObjects: {
     async listAll() {
       await delay()
-      return readDb().entityObjects
+      return (await readDb()).entityObjects
     },
     async listByEntity(entityId: string) {
       await delay()
-      return readDb().entityObjects.filter((object) => object.entityId === entityId)
+      return (await readDb()).entityObjects.filter((object) => object.entityId === entityId)
     },
     async getById(id: string) {
       await delay()
-      return readDb().entityObjects.find((object) => object.id === id)
+      return (await readDb()).entityObjects.find((object) => object.id === id)
     },
     async create(input: CreateEntityObjectInput) {
-      const db = readDb()
+      const db = await readDb()
       const timestamp = nowIso()
       const object: EntityObject = {
         id: createId('obj'),
@@ -280,12 +284,12 @@ export const repositories = {
         kind: 'change',
         title: 'Создан объект',
       })
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return object
     },
     async createMany(inputs: CreateEntityObjectInput[]) {
-      const db = readDb()
+      const db = await readDb()
       const created: EntityObject[] = []
       inputs.forEach((input) => {
         const timestamp = nowIso()
@@ -312,12 +316,12 @@ export const repositories = {
         })
         created.push(object)
       })
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return created
     },
     async update(input: UpdateEntityObjectInput) {
-      const db = readDb()
+      const db = await readDb()
       const object = db.entityObjects.find((item) => item.id === input.id)
       if (!object) throw new Error('Объект сущности не найден')
       object.values = input.values
@@ -334,19 +338,19 @@ export const repositories = {
         kind: 'change',
         title: 'Изменены атрибуты объекта',
       })
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return object
     },
     async delete(id: string) {
-      const db = readDb()
+      const db = await readDb()
       const object = db.entityObjects.find((item) => item.id === id)
       if (!object) throw new Error('Объект сущности не найден')
       db.entityObjects = db.entityObjects.filter((item) => item.id !== id)
       db.tasks = db.tasks.filter((task) => task.objectId !== id)
       db.attachments = db.attachments.filter((attachment) => attachment.objectId !== id)
       db.auditEvents = db.auditEvents.filter((event) => event.objectId !== id)
-      writeDb(db)
+      await writeDb(db)
       await delay()
     },
   },
@@ -354,10 +358,10 @@ export const repositories = {
   dictionaries: {
     async list() {
       await delay()
-      return readDb().dictionaries
+      return (await readDb()).dictionaries
     },
     async save(dictionary: Dictionary) {
-      const db = readDb()
+      const db = await readDb()
       const existing = db.dictionaries.find((item) => item.id === dictionary.id)
       const { dictionary: normalized, itemCodeChanges } = normalizeDictionary(dictionary, existing, db)
       migrateEnumItemCodes(db, normalized, itemCodeChanges)
@@ -365,22 +369,22 @@ export const repositories = {
       db.dictionaries = exists
         ? db.dictionaries.map((item) => (item.id === dictionary.id ? normalized : item))
         : [...db.dictionaries, normalized]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return normalized
     },
     async delete(id: string) {
-      const db = readDb()
+      const db = await readDb()
       db.dictionaries = db.dictionaries.filter((dictionary) => dictionary.id !== id)
       db.entitySchemas = db.entitySchemas.map((schema) => ({
         ...schema,
         fields: schema.fields.map((field) => (field.enumId === id ? { ...field, enumId: undefined } : field)),
       }))
-      writeDb(db)
+      await writeDb(db)
       await delay()
     },
     async addItem(dictionaryId: string, name: string) {
-      const db = readDb()
+      const db = await readDb()
       const dictionary = db.dictionaries.find((item) => item.id === dictionaryId)
       if (!dictionary) throw new Error('Справочник не найден')
       const item: DictionaryItem = {
@@ -390,7 +394,7 @@ export const repositories = {
         active: true,
       }
       dictionary.items.push(item)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return item
     },
@@ -399,19 +403,19 @@ export const repositories = {
   users: {
     async authenticate(login: string, password: string) {
       await delay()
-      const db = readDb()
+      const db = await readDb()
       return db.users.find((user) => user.login === login && user.password === password && user.status === 'active')
     },
     async list() {
       await delay()
-      return readDb().users
+      return (await readDb()).users
     },
     async save(user: User) {
-      const db = readDb()
+      const db = await readDb()
       db.users = db.users.some((item) => item.id === user.id)
         ? db.users.map((item) => (item.id === user.id ? user : item))
         : [...db.users, user]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return user
     },
@@ -420,16 +424,16 @@ export const repositories = {
   roles: {
     async list() {
       await delay()
-      return readDb().roles
+      return (await readDb()).roles
     },
     async save(role: Role) {
-      const db = readDb()
+      const db = await readDb()
       const normalized: Role = {
         ...role,
         code: uniqueSystemCode(role.name, db.roles.filter((item) => item.id !== role.id).map((item) => item.code), 'role'),
       }
       db.roles = db.roles.map((item) => (item.id === role.id ? normalized : item))
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return normalized
     },
@@ -438,14 +442,14 @@ export const repositories = {
   organizations: {
     async list() {
       await delay()
-      return readDb().organizations
+      return (await readDb()).organizations
     },
     async save(organization: Organization) {
-      const db = readDb()
+      const db = await readDb()
       db.organizations = db.organizations.some((item) => item.id === organization.id)
         ? db.organizations.map((item) => (item.id === organization.id ? organization : item))
         : [...db.organizations, organization]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return organization
     },
@@ -454,30 +458,30 @@ export const repositories = {
   workflows: {
     async list() {
       await delay()
-      return readDb().workflows
+      return (await readDb()).workflows
     },
     async getById(id: string) {
       await delay()
-      return readDb().workflows.find((workflow) => workflow.id === id)
+      return (await readDb()).workflows.find((workflow) => workflow.id === id)
     },
     async getByEntity(entityId: string) {
       await delay()
-      return readDb().workflows.find((workflow) => workflow.entityId === entityId && workflow.status === 'active')
+      return (await readDb()).workflows.find((workflow) => workflow.entityId === entityId && workflow.status === 'active')
     },
     async save(workflow: Workflow) {
-      const db = readDb()
+      const db = await readDb()
       const existing = db.workflows.find((item) => item.id === workflow.id)
       const { workflow: normalized, stateCodeChanges } = normalizeWorkflow(workflow, existing)
       migrateWorkflowStateCodes(db, normalized.entityId, stateCodeChanges)
       db.workflows = db.workflows.some((item) => item.id === workflow.id)
         ? db.workflows.map((item) => (item.id === workflow.id ? normalized : item))
         : [...db.workflows, normalized]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return normalized
     },
     async applyTransition(objectId: string, transitionId: string, actorId: string) {
-      const db = readDb()
+      const db = await readDb()
       const object = db.entityObjects.find((item) => item.id === objectId)
       if (!object) throw new Error('Объект сущности не найден')
       const workflow = db.workflows.find((item) => item.entityId === object.entityId && item.status === 'active')
@@ -512,7 +516,7 @@ export const repositories = {
           })
         }
       }
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return object
     },
@@ -521,19 +525,19 @@ export const repositories = {
   geoRules: {
     async list() {
       await delay()
-      return readDb().geoRules
+      return (await readDb()).geoRules
     },
     async save(rule: GeoRule) {
-      const db = readDb()
+      const db = await readDb()
       db.geoRules = db.geoRules.some((item) => item.id === rule.id)
         ? db.geoRules.map((item) => (item.id === rule.id ? rule : item))
         : [...db.geoRules, rule]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return rule
     },
     async validate(object: EntityObject): Promise<GeoValidationResult> {
-      const db = readDb()
+      const db = await readDb()
       const rules = db.geoRules.filter((rule) => rule.entityId === object.entityId && rule.status === 'active')
       const conflicts = rules.flatMap((rule) => {
         const targetSchema = db.entitySchemas.find((schema) => schema.id === rule.targetEntityId)
@@ -551,14 +555,14 @@ export const repositories = {
   layers: {
     async list() {
       await delay()
-      return readDb().layers
+      return (await readDb()).layers
     },
     async save(layer: Layer) {
-      const db = readDb()
+      const db = await readDb()
       db.layers = db.layers.some((item) => item.id === layer.id)
         ? db.layers.map((item) => (item.id === layer.id ? layer : item))
         : [...db.layers, layer]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return layer
     },
@@ -567,17 +571,17 @@ export const repositories = {
   tasks: {
     async list() {
       await delay()
-      return readDb().tasks
+      return (await readDb()).tasks
     },
     async listByAssignee(userId: string) {
       await delay()
-      return readDb().tasks.filter((task) => task.assigneeId === userId)
+      return (await readDb()).tasks.filter((task) => task.assigneeId === userId)
     },
     async complete(taskId: string) {
-      const db = readDb()
+      const db = await readDb()
       const task = db.tasks.find((item) => item.id === taskId)
       if (task) task.status = 'done'
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return task
     },
@@ -586,7 +590,7 @@ export const repositories = {
   attachments: {
     async listByObject(entityId: string, objectId: string) {
       await delay()
-      return readDb().attachments.filter((item) => item.entityId === entityId && item.objectId === objectId)
+      return (await readDb()).attachments.filter((item) => item.entityId === entityId && item.objectId === objectId)
     },
     async add(
       entityId: string,
@@ -601,7 +605,7 @@ export const repositories = {
         dataUrl?: string
       },
     ) {
-      const db = readDb()
+      const db = await readDb()
       const attachment: Attachment = {
         id: createId('att'),
         entityId,
@@ -625,14 +629,14 @@ export const repositories = {
         kind: 'document',
         title: `Добавлен документ: ${attachment.name}`,
       })
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return attachment
     },
     async delete(id: string) {
-      const db = readDb()
+      const db = await readDb()
       db.attachments = db.attachments.filter((item) => item.id !== id)
-      writeDb(db)
+      await writeDb(db)
       await delay()
     },
   },
@@ -640,12 +644,12 @@ export const repositories = {
   auditEvents: {
     async listByObject(entityId: string, objectId: string) {
       await delay()
-      return readDb().auditEvents.filter((item) => item.entityId === entityId && item.objectId === objectId)
+      return (await readDb()).auditEvents.filter((item) => item.entityId === entityId && item.objectId === objectId)
     },
     async add(event: AuditEvent) {
-      const db = readDb()
+      const db = await readDb()
       db.auditEvents.unshift(event)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return event
     },
@@ -654,12 +658,12 @@ export const repositories = {
   settings: {
     async get() {
       await delay()
-      return readDb().settings
+      return (await readDb()).settings
     },
     async save(settings: PlatformSettings) {
-      const db = readDb()
+      const db = await readDb()
       db.settings = settings
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return settings
     },
@@ -667,63 +671,185 @@ export const repositories = {
 
   userSettings: {
     async getByUser(userId: string) {
-      const db = readDb()
+      const db = await readDb()
       const settings = ensureUserSettings(db, userId)
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return settings
     },
     async save(settings: UserSettings) {
-      const db = readDb()
+      const db = await readDb()
       const normalized = normalizeUserSettings(settings, db)
       db.userSettings = db.userSettings.some((item) => item.userId === settings.userId)
         ? db.userSettings.map((item) => (item.userId === settings.userId ? normalized : item))
         : [...db.userSettings, normalized]
-      writeDb(db)
+      await writeDb(db)
       await delay()
       return normalized
     },
   },
 }
 
-function readDb(): AppDatabase {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) {
-    const seeded = createSeedDatabase()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded))
-    return seeded
+let dbCache: AppDatabase | null = null
+let dbLoadPromise: Promise<AppDatabase> | null = null
+
+async function readDb(): Promise<AppDatabase> {
+  if (dbCache) return dbCache
+  if (dbLoadPromise) return dbLoadPromise
+
+  dbLoadPromise = loadDb()
+  try {
+    dbCache = await dbLoadPromise
+    return dbCache
+  } finally {
+    dbLoadPromise = null
   }
-  const db = migrateDb(JSON.parse(raw) as AppDatabase)
-  writeDb(db)
-  return db
 }
 
-function writeDb(db: AppDatabase): void {
+async function writeDb(db: AppDatabase): Promise<void> {
+  dbCache = db
+  if (STATIC_STORAGE_ENABLED) {
+    writeLegacyDb(db)
+    markLegacyStorageMigrated()
+    return
+  }
+
+  try {
+    await writeRuntimeDb(db)
+    markLegacyStorageMigrated()
+  } catch {
+    writeLegacyDb(db)
+  }
+}
+
+async function loadDb(): Promise<AppDatabase> {
+  const legacyDb = readLegacyDb()
+
+  if (STATIC_STORAGE_ENABLED) {
+    const staticDb = migrateDb(legacyDb ?? createSeedDatabase())
+    writeLegacyDb(staticDb)
+    markLegacyStorageMigrated()
+    return staticDb
+  }
+
+  try {
+    const runtimeDb = migrateDb(await readRuntimeDb())
+    const migratedLegacyDb = legacyDb ? migrateDb(legacyDb) : null
+    const shouldImportLegacy = Boolean(
+      migratedLegacyDb
+        && !isLegacyStorageMigrated()
+        && shouldPreferLegacyDb(migratedLegacyDb, runtimeDb),
+    )
+
+    if (shouldImportLegacy && migratedLegacyDb) {
+      await writeRuntimeDb(migratedLegacyDb)
+      markLegacyStorageMigrated()
+      return migratedLegacyDb
+    }
+
+    if (!isLegacyStorageMigrated()) markLegacyStorageMigrated()
+    return runtimeDb
+  } catch {
+    const fallback = migrateDb(legacyDb ?? createSeedDatabase())
+    writeLegacyDb(fallback)
+    return fallback
+  }
+}
+
+async function readRuntimeDb(): Promise<AppDatabase> {
+  if (typeof fetch === 'undefined') throw new Error('Runtime API недоступен')
+  const response = await fetch(SQLITE_DATABASE_ENDPOINT, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error('SQLite runtime не вернул данные')
+  const snapshot = await response.json()
+  if (!isAppDatabase(snapshot)) throw new Error('SQLite runtime вернул некорректные данные')
+  return snapshot
+}
+
+async function writeRuntimeDb(db: AppDatabase): Promise<void> {
+  if (typeof fetch === 'undefined') throw new Error('Runtime API недоступен')
+  const response = await fetch(SQLITE_DATABASE_ENDPOINT, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(db),
+  })
+  if (!response.ok) throw new Error('SQLite runtime не сохранил данные')
+}
+
+function readLegacyDb(): AppDatabase | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) as AppDatabase : null
+  } catch {
+    return null
+  }
+}
+
+function writeLegacyDb(db: AppDatabase): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
-  publishGeneratedApiSnapshot(db)
 }
 
-let snapshotPublishScheduled = false
-let pendingGeneratedApiSnapshot: AppDatabase | null = null
+function isLegacyStorageMigrated(): boolean {
+  return localStorage.getItem(SQLITE_MIGRATION_KEY) === 'true'
+}
 
-function publishGeneratedApiSnapshot(db: AppDatabase): void {
-  if (typeof window === 'undefined' || typeof fetch === 'undefined') return
-  pendingGeneratedApiSnapshot = db
-  if (snapshotPublishScheduled) return
+function markLegacyStorageMigrated(): void {
+  localStorage.setItem(SQLITE_MIGRATION_KEY, 'true')
+}
 
-  snapshotPublishScheduled = true
-  window.setTimeout(() => {
-    snapshotPublishScheduled = false
-    const snapshot = pendingGeneratedApiSnapshot
-    pendingGeneratedApiSnapshot = null
-    if (!snapshot) return
+function shouldPreferLegacyDb(legacyDb: AppDatabase, runtimeDb: AppDatabase): boolean {
+  const seed = migrateDb(createSeedDatabase())
+  const legacyScore = databaseContentScore(legacyDb)
+  const runtimeScore = databaseContentScore(runtimeDb)
+  if (legacyScore > runtimeScore) return true
+  return runtimeScore === 0
+    && stableDatabaseJson(legacyDb) !== stableDatabaseJson(seed)
+    && stableDatabaseJson(runtimeDb) === stableDatabaseJson(seed)
+}
 
-    void fetch('/api/v1/__runtime/snapshot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(snapshot),
-    }).catch(() => undefined)
-  }, 0)
+function databaseContentScore(db: AppDatabase): number {
+  const homeBlocks = db.userSettings.reduce((sum, settings) => sum + settings.home.summaryBlocks.length, 0)
+  const extraUsers = db.users.filter((user) => user.id !== 'usr_admin').length
+  const extraRoles = db.roles.filter((role) => role.id !== 'role_admin').length
+  const extraOrganizations = db.organizations.filter((organization) => organization.id !== 'org_system').length
+  return db.entitySchemas.length * 100
+    + db.entityObjects.length * 20
+    + db.dictionaries.length * 15
+    + db.workflows.length * 12
+    + db.geoRules.length * 10
+    + db.layers.length * 8
+    + db.tasks.length * 6
+    + db.attachments.length * 4
+    + db.auditEvents.length
+    + homeBlocks * 5
+    + extraUsers * 5
+    + extraRoles * 5
+    + extraOrganizations * 3
+}
+
+function stableDatabaseJson(db: AppDatabase): string {
+  return JSON.stringify(db)
+}
+
+function isAppDatabase(value: unknown): value is AppDatabase {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Record<keyof AppDatabase, unknown>>
+  return Array.isArray(candidate.entitySchemas)
+    && Array.isArray(candidate.entityObjects)
+    && Array.isArray(candidate.dictionaries)
+    && Array.isArray(candidate.users)
+    && Array.isArray(candidate.roles)
+    && Array.isArray(candidate.organizations)
+    && Array.isArray(candidate.workflows)
+    && Array.isArray(candidate.tasks)
+    && Array.isArray(candidate.geoRules)
+    && Array.isArray(candidate.layers)
+    && Array.isArray(candidate.attachments)
+    && Array.isArray(candidate.auditEvents)
+    && typeof candidate.settings === 'object'
+    && Array.isArray(candidate.userSettings)
 }
 
 function migrateDb(db: AppDatabase): AppDatabase {
@@ -945,9 +1071,9 @@ function defaultAddressField(): EntitySchema['fields'][number] {
   }
 }
 
-function defaultMapSettings(): EntityMapSettings {
+function defaultMapSettings(geometryType: GeometryType = 'none'): EntityMapSettings {
   return {
-    enabledGeometryTypes: ['point'],
+    enabledGeometryTypes: geometryTypeToEnabledList(geometryType),
     clusteringEnabled: false,
     styles: defaultGeometryStyles(),
     colorRules: [],
@@ -956,7 +1082,7 @@ function defaultMapSettings(): EntityMapSettings {
 
 function normalizeMapSettings(settings: EntityMapSettings | undefined, geometryType: GeometryType): EntityMapSettings {
   const stored = settings as StoredMapSettings | undefined
-  const fallback = defaultMapSettings()
+  const fallback = defaultMapSettings(geometryType)
   const enabledGeometryTypes = (stored?.enabledGeometryTypes ?? geometryTypeToEnabledList(geometryType))
     .filter((type): type is EntityMapSettings['enabledGeometryTypes'][number] =>
       type === 'point' || type === 'lineString' || type === 'polygon',
@@ -1023,7 +1149,7 @@ function primaryMapStyle(schema: EntitySchema): EntityMapStyle {
 }
 
 function geometryTypeToEnabledList(geometryType: GeometryType): EntityMapSettings['enabledGeometryTypes'] {
-  return geometryType === 'none' ? ['point'] : [geometryType]
+  return geometryType === 'none' ? [] : [geometryType]
 }
 
 function primaryGeometryType(settings: EntityMapSettings, current: GeometryType): GeometryType {

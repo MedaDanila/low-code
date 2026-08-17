@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { createId, nowIso } from '../shared/lib/id'
 import { generateSystemCode } from '../shared/lib/codegen'
+import { setPlatformDateTimeFormat } from '../shared/lib/format'
 import { repositories } from '../shared/api/repositories'
 import type {
   AppDatabase,
@@ -100,6 +101,7 @@ export const usePlatformStore = defineStore('platform', () => {
     name: string
     description?: string
     geometryType?: EntitySchema['geometryType']
+    includeAddress?: boolean
   }): Promise<EntitySchema> {
     const schema = await repositories.entitySchemas.create(input)
     await refresh()
@@ -360,6 +362,7 @@ export const usePlatformStore = defineStore('platform', () => {
     auditEvents.value = db.auditEvents
     settings.value = db.settings
     userSettings.value = db.userSettings
+    setPlatformDateTimeFormat(db.settings.dateTimeFormat)
   }
 
   return {
