@@ -54,6 +54,7 @@ npm run build:pages
 - `public/.nojekyll`, чтобы GitHub Pages не обрабатывал `dist` через Jekyll.
 
 В GitHub нужно открыть `Settings -> Pages` и выбрать source `GitHub Actions`.
+Не выбирайте `Deploy from a branch`: в этом режиме GitHub Pages опубликует исходный `index.html` из корня проекта, а не собранную папку `dist`, и приложение откроется белым экраном.
 
 Важно: GitHub Pages является статическим хостингом. SQLite и dev API `/api/v1/...` работают в режиме `npm run dev`; на Pages пользовательские данные сохраняются в браузере через `localStorage`.
 
