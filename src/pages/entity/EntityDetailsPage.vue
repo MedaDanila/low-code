@@ -82,6 +82,10 @@ function cancelEdit(): void {
   editing.value = false
 }
 
+function setEditingTab(tab: EntityEditTab): void {
+  editingTab.value = tab
+}
+
 function hasAddressChanged(
   schema: EntitySchema,
   currentValues: EntityFormPayload['values'],
@@ -102,7 +106,7 @@ async function validate(payload: EntityFormPayload) {
 </script>
 
 <template>
-  <div class="entity-details" :class="{ 'entity-details--map': activeTab === 'map' || (editing && editingTab === 'map') }">
+  <div class="entity-details" :class="{ 'entity-details--map': editing ? editingTab === 'map' : activeTab === 'map' }">
     <UiEmptyState v-if="!schema || !object" title="Объект не найден" />
     <div v-else-if="editing" class="entity-details__editor">
       <EntityForm
@@ -116,6 +120,7 @@ async function validate(payload: EntityFormPayload) {
         @submit="save"
         @validate="validate"
         @cancel="cancelEdit"
+        @tab-change="setEditingTab"
       />
     </div>
     <EntityCard v-else v-model:active-tab="activeTab" :schema="schema" :object="object" @edit="startEdit" />
@@ -137,6 +142,8 @@ async function validate(payload: EntityFormPayload) {
 .entity-details__editor {
   display: grid;
   gap: 16px;
+  align-content: start;
+  align-items: start;
 }
 
 .entity-details--map .entity-details__editor {

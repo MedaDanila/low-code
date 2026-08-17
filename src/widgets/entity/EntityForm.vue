@@ -33,6 +33,7 @@ const emit = defineEmits<{
   submit: [payload: EntityFormPayload]
   validate: [payload: EntityFormPayload]
   cancel: []
+  'tab-change': [tab: EntityFormTab]
 }>()
 
 const activeTab = ref<EntityFormTab>('main')
@@ -84,6 +85,7 @@ watch(
   },
   { immediate: true },
 )
+watch(activeTab, (tab) => emit('tab-change', tab), { immediate: true })
 
 function hydrateForm() {
   Object.keys(values).forEach((key) => delete values[key])

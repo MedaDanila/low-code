@@ -226,6 +226,8 @@ function emitGeometry(feature?: Feature<Geometry>) {
 async function handleMapClick(event: MapBrowserEvent<PointerEvent>): Promise<void> {
   if (activeTool.value !== 'pick-building' || geometryLoading.value) return
   const [lon, lat] = toLonLat(event.coordinate)
+  buildingStatus.value = 'Ищем контур здания в выбранной точке...'
+  geometryError.value = ''
   await determineBuildingGeometry([Number(lon.toFixed(6)), Number(lat.toFixed(6))], undefined, true)
 }
 
@@ -409,6 +411,7 @@ function setModifyActive(active: boolean) {
             {{ geometryLoading ? 'Определяем...' : 'По адресу' }}
           </button>
           <button
+            v-if="allowedGeometryTypes.includes('polygon')"
             type="button"
             :class="{ active: activeTool === 'pick-building' }"
             title="Кликнуть по дому на карте и выбрать его контур"

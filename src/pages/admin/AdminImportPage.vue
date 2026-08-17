@@ -10,6 +10,7 @@ import UiTable from '../../shared/ui/UiTable.vue'
 import { geocodeAddress, type DadataAddressSuggestion } from '../../shared/api/dadata'
 import { findBuildingGeometryByCoordinates } from '../../shared/api/nominatim'
 import { readSpreadsheetTableFile, type ImportedSpreadsheetTable } from '../../shared/lib/dictionaryImport'
+import { parseImportedDateValue } from '../../shared/lib/importDate'
 import {
   OBJECT_STATUS_DRAFT,
   OBJECT_STATUS_PUBLISHED,
@@ -335,17 +336,11 @@ function parseBoolean(value: string, field: EntityField, errors: string[]): bool
 }
 
 function parseDateValue(value: string, field: EntityField, errors: string[]): string | null {
-  const normalized = value.trim()
-  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (isoMatch) return field.type === 'datetime' ? normalized : normalized.slice(0, 10)
-  const ruMatch = normalized.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/)
-  if (ruMatch) {
-    const [, day, month, year] = ruMatch
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
-  const timestamp = Date.parse(normalized)
-  if (!Number.isNaN(timestamp)) return new Date(timestamp).toISOString().slice(0, field.type === 'datetime' ? 16 : 10)
-  errors.push(`Поле «${field.name}» должно быть датой`)
+  const parsed = field.type === 'date' || field.type === 'datetime'
+    ? parseImportedDateValue(value, field.type)
+    : null
+  if (parsed) return parsed
+  errors.push(`Поле «${field.name}» должно быть ${field.type === 'datetime' ? 'датой и временем' : 'датой'}`)
   return null
 }
 

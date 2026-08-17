@@ -7,6 +7,7 @@ type GeoJsonGeometry =
   | { type: 'LineString'; coordinates: unknown }
   | { type: 'Polygon'; coordinates: unknown }
   | { type: 'MultiPolygon'; coordinates: unknown }
+  | { type: 'GeometryCollection'; geometries?: GeoJsonGeometry[] }
 
 interface NominatimFeatureCollection {
   features?: NominatimFeature[]
@@ -83,6 +84,15 @@ function toDomainPolygon(geometry: GeoJsonGeometry, sourcePoint: Coordinates): D
 
   if (geometry.type === 'MultiPolygon') {
     const polygons = normalizeMultiPolygon(geometry.coordinates)
+    const selected = polygons.find((polygon) => pointInRing(sourcePoint, polygon[0])) ?? largestPolygon(polygons)
+    return selected ? { type: 'Polygon', coordinates: selected } : null
+  }
+
+  if (geometry.type === 'GeometryCollection') {
+    const polygons = (Array.isArray(geometry.geometries) ? geometry.geometries : [])
+      .map((item) => toDomainPolygon(item, sourcePoint))
+      .filter((item): item is DomainGeometry & { type: 'Polygon' } => item?.type === 'Polygon')
+      .map((item) => item.coordinates)
     const selected = polygons.find((polygon) => pointInRing(sourcePoint, polygon[0])) ?? largestPolygon(polygons)
     return selected ? { type: 'Polygon', coordinates: selected } : null
   }
