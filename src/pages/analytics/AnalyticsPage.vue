@@ -32,6 +32,33 @@ const contractors = computed(() => {
   })
   return Array.from(buckets.entries()).map(([name, count]) => ({ name, count }))
 })
+const auditFieldChanges = computed(() =>
+  platform.auditEvents.flatMap((event) => (event.changes ?? []).map((change) => ({ event, change }))),
+)
+const changedObjectCount = computed(() => new Set(auditFieldChanges.value.map((item) => item.event.objectId)).size)
+const bulkEditEventCount = computed(() =>
+  platform.auditEvents.filter((event) => event.title === 'Массовое редактирование объекта').length
+)
+const changedFields = computed(() => {
+  const buckets = new Map<string, { name: string; count: number }>()
+  auditFieldChanges.value.forEach(({ change }) => {
+    const current = buckets.get(change.fieldCode) ?? { name: change.fieldName, count: 0 }
+    current.count += 1
+    buckets.set(change.fieldCode, current)
+  })
+  return Array.from(buckets.values()).sort((left, right) => right.count - left.count).slice(0, 6)
+})
+const changeAuthors = computed(() => {
+  const buckets = new Map<string, number>()
+  auditFieldChanges.value.forEach(({ event }) => buckets.set(event.actorId, (buckets.get(event.actorId) ?? 0) + 1))
+  return Array.from(buckets.entries())
+    .map(([actorId, count]) => ({
+      name: platform.userById(actorId)?.lastName ?? 'Система',
+      count,
+    }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 6)
+})
 </script>
 
 <template>
@@ -52,6 +79,33 @@ const contractors = computed(() => {
       <article class="metric-card"><span>Опубликовано</span><strong>{{ orders.filter((item) => item.status === 'published').length }}</strong></article>
       <article class="metric-card"><span>Черновики</span><strong>{{ orders.filter((item) => item.status === 'draft').length }}</strong></article>
       <article class="metric-card"><span>Просроченные</span><strong>0</strong></article>
+      <article class="metric-card"><span>Полевых изменений</span><strong>{{ auditFieldChanges.length }}</strong></article>
+      <article class="metric-card"><span>Объектов изменено</span><strong>{{ changedObjectCount }}</strong></article>
+      <article class="metric-card"><span>Массовых сохранений</span><strong>{{ bulkEditEventCount }}</strong></article>
+    </section>
+    <section class="page-grid two" style="margin-top: 18px">
+      <div class="panel">
+        <h3 class="surface-title">Частые изменения полей</h3>
+        <div class="bar-list">
+          <div v-for="bucket in changedFields" :key="bucket.name" class="bar-row">
+            <span>{{ bucket.name }}</span>
+            <div><i :style="{ width: `${Math.max(bucket.count * 12, 16)}%` }" /></div>
+            <strong>{{ bucket.count }}</strong>
+          </div>
+          <p v-if="changedFields.length === 0" class="analytics-empty">Нет изменений</p>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 class="surface-title">Активность пользователей</h3>
+        <div class="bar-list">
+          <div v-for="bucket in changeAuthors" :key="bucket.name" class="bar-row">
+            <span>{{ bucket.name }}</span>
+            <div><i :style="{ width: `${Math.max(bucket.count * 12, 16)}%` }" /></div>
+            <strong>{{ bucket.count }}</strong>
+          </div>
+          <p v-if="changeAuthors.length === 0" class="analytics-empty">Нет изменений</p>
+        </div>
+      </div>
     </section>
     <section class="page-grid two" style="margin-top: 18px">
       <div class="panel">
@@ -123,5 +177,11 @@ const contractors = computed(() => {
   width: 34px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: linear-gradient(180deg, #2563eb, #60a5fa);
+}
+
+.analytics-empty {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 </style>

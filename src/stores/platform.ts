@@ -178,6 +178,17 @@ export const usePlatformStore = defineStore('platform', () => {
     return object
   }
 
+  async function updateObjects(inputs: Array<{
+    id: string
+    values: EntityObjectValues
+    geometry?: EntityObject['geometry']
+    actorId: string
+  }>): Promise<EntityObject[]> {
+    const objects = await repositories.entityObjects.updateMany(inputs)
+    await refresh()
+    return objects
+  }
+
   async function deleteObject(id: string): Promise<void> {
     await repositories.entityObjects.delete(id)
     await refresh()
@@ -405,6 +416,7 @@ export const usePlatformStore = defineStore('platform', () => {
     createObject,
     importObjects,
     updateObject,
+    updateObjects,
     deleteObject,
     validateObject,
     applyWorkflowTransition,

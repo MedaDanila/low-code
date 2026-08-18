@@ -12,6 +12,8 @@ import type {
   AppDatabase,
   Attachment,
   AuditEvent,
+  AuditFieldChange,
+  DashboardBlockKind,
   DashboardFilter,
   DashboardFilterGroup,
   DashboardSummaryBlock,
@@ -20,6 +22,7 @@ import type {
   DictionaryItem,
   EntityObject,
   EntityObjectValues,
+  EntityField,
   EntityMapSettings,
   EntityMapStyle,
   EntitySchema,
@@ -275,6 +278,16 @@ export const repositories = {
         updatedBy: input.actorId,
       }
       db.entityObjects.push(object)
+      const changes = buildObjectAuditChanges(db, {
+        entityId: object.entityId,
+        beforeValues: {},
+        afterValues: object.values,
+        beforeStatus: null,
+        afterStatus: object.status ?? null,
+        beforeGeometry: null,
+        afterGeometry: object.geometry ?? null,
+        includePresentValues: true,
+      })
       db.auditEvents.unshift({
         id: createId('aud'),
         entityId: object.entityId,
@@ -283,6 +296,8 @@ export const repositories = {
         actorId: input.actorId,
         kind: 'change',
         title: 'Создан объект',
+        details: auditChangesSummary(changes),
+        changes,
       })
       await writeDb(db)
       await delay()
@@ -305,6 +320,16 @@ export const repositories = {
           updatedBy: input.actorId,
         }
         db.entityObjects.push(object)
+        const changes = buildObjectAuditChanges(db, {
+          entityId: object.entityId,
+          beforeValues: {},
+          afterValues: object.values,
+          beforeStatus: null,
+          afterStatus: object.status ?? null,
+          beforeGeometry: null,
+          afterGeometry: object.geometry ?? null,
+          includePresentValues: true,
+        })
         db.auditEvents.unshift({
           id: createId('aud'),
           entityId: object.entityId,
@@ -313,6 +338,8 @@ export const repositories = {
           actorId: input.actorId,
           kind: 'change',
           title: 'Создан объект импортом',
+          details: auditChangesSummary(changes),
+          changes,
         })
         created.push(object)
       })
@@ -322,25 +349,17 @@ export const repositories = {
     },
     async update(input: UpdateEntityObjectInput) {
       const db = await readDb()
-      const object = db.entityObjects.find((item) => item.id === input.id)
-      if (!object) throw new Error('Объект сущности не найден')
-      object.values = input.values
-      object.geometry = input.geometry
-      object.status = resolveObjectDataStatus(db, object.entityId, input.values, input.geometry)
-      object.updatedAt = nowIso()
-      object.updatedBy = input.actorId
-      db.auditEvents.unshift({
-        id: createId('aud'),
-        entityId: object.entityId,
-        objectId: object.id,
-        at: object.updatedAt,
-        actorId: input.actorId,
-        kind: 'change',
-        title: 'Изменены атрибуты объекта',
-      })
+      const object = applyEntityObjectUpdate(db, input, 'Изменены атрибуты объекта')
       await writeDb(db)
       await delay()
       return object
+    },
+    async updateMany(inputs: UpdateEntityObjectInput[]) {
+      const db = await readDb()
+      const updated = inputs.map((input) => applyEntityObjectUpdate(db, input, 'Массовое редактирование объекта'))
+      await writeDb(db)
+      await delay()
+      return updated
     },
     async delete(id: string) {
       const db = await readDb()
@@ -998,6 +1017,135 @@ function matchesRule(rule: GeoRule, object: EntityObject, targetObject: EntityOb
   return distanceBetweenGeometriesMeters(object.geometry, targetObject.geometry) <= (rule.distanceMeters ?? 0)
 }
 
+function applyEntityObjectUpdate(
+  db: AppDatabase,
+  input: UpdateEntityObjectInput,
+  title: string,
+): EntityObject {
+  const object = db.entityObjects.find((item) => item.id === input.id)
+  if (!object) throw new Error('Объект сущности не найден')
+
+  const nextStatus = resolveObjectDataStatus(db, object.entityId, input.values, input.geometry)
+  const changes = buildObjectAuditChanges(db, {
+    entityId: object.entityId,
+    beforeValues: object.values,
+    afterValues: input.values,
+    beforeStatus: object.status ?? null,
+    afterStatus: nextStatus,
+    beforeGeometry: object.geometry ?? null,
+    afterGeometry: input.geometry ?? null,
+  })
+
+  object.values = input.values
+  object.geometry = input.geometry
+  object.status = nextStatus
+
+  if (changes.length > 0) {
+    object.updatedAt = nowIso()
+    object.updatedBy = input.actorId
+    db.auditEvents.unshift({
+      id: createId('aud'),
+      entityId: object.entityId,
+      objectId: object.id,
+      at: object.updatedAt,
+      actorId: input.actorId,
+      kind: 'change',
+      title,
+      details: auditChangesSummary(changes),
+      changes,
+    })
+  }
+
+  return object
+}
+
+function buildObjectAuditChanges(
+  db: AppDatabase,
+  input: {
+    entityId: string
+    beforeValues: EntityObjectValues
+    afterValues: EntityObjectValues
+    beforeStatus: string | null
+    afterStatus: string | null
+    beforeGeometry: EntityObject['geometry'] | null
+    afterGeometry: EntityObject['geometry'] | null
+    includePresentValues?: boolean
+  },
+): AuditFieldChange[] {
+  const changes: AuditFieldChange[] = []
+  const fields = auditFieldsForEntity(db, input.entityId, input.beforeValues, input.afterValues)
+
+  fields.forEach((field) => {
+    const fieldPresent = field.code in input.beforeValues || field.code in input.afterValues
+    const oldValue = cloneAuditValue(input.beforeValues[field.code])
+    const newValue = cloneAuditValue(input.afterValues[field.code])
+    if (!input.includePresentValues && auditValuesEqual(oldValue, newValue)) return
+    if (input.includePresentValues && !fieldPresent) return
+    changes.push({
+      fieldCode: field.code,
+      fieldName: field.name,
+      fieldType: field.type,
+      oldValue,
+      newValue,
+    })
+  })
+
+  if (!auditValuesEqual(input.beforeStatus, input.afterStatus)) {
+    changes.push({
+      fieldCode: '__status',
+      fieldName: 'Статус',
+      fieldType: 'status',
+      oldValue: input.beforeStatus,
+      newValue: input.afterStatus,
+    })
+  }
+
+  if (!auditValuesEqual(input.beforeGeometry, input.afterGeometry)) {
+    changes.push({
+      fieldCode: '__geometry',
+      fieldName: 'Геометрия',
+      fieldType: 'geometry',
+      oldValue: cloneAuditValue(input.beforeGeometry),
+      newValue: cloneAuditValue(input.afterGeometry),
+    })
+  }
+
+  return changes
+}
+
+function auditFieldsForEntity(
+  db: AppDatabase,
+  entityId: string,
+  beforeValues: EntityObjectValues,
+  afterValues: EntityObjectValues,
+): Array<Pick<EntityField, 'code' | 'name' | 'type'>> {
+  const schemaFields = db.entitySchemas
+    .find((schema) => schema.id === entityId)
+    ?.fields.slice()
+    .sort((a, b) => a.order - b.order) ?? []
+  const knownCodes = new Set(schemaFields.map((field) => field.code))
+  const unknownFields = Array.from(new Set([...Object.keys(beforeValues), ...Object.keys(afterValues)]))
+    .filter((code) => !knownCodes.has(code))
+    .map((code) => ({ code, name: code, type: 'string' as const }))
+
+  return [...schemaFields, ...unknownFields]
+}
+
+function cloneAuditValue(value: unknown): AuditFieldChange['oldValue'] {
+  if (value === undefined) return null
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  return JSON.parse(JSON.stringify(value)) as AuditFieldChange['oldValue']
+}
+
+function auditValuesEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(cloneAuditValue(left)) === JSON.stringify(cloneAuditValue(right))
+}
+
+function auditChangesSummary(changes: AuditFieldChange[]): string | undefined {
+  if (changes.length === 0) return undefined
+  return `Изменено полей: ${changes.length}`
+}
+
 function normalizeEntitySchema(
   schema: EntitySchema,
   existing: EntitySchema | undefined,
@@ -1298,18 +1446,25 @@ function normalizeUserSettings(settings: UserSettings, db: AppDatabase): UserSet
     .map((sourceBlock, index) => {
       const block = sourceBlock as StoredSummaryBlock
       const schema = db.entitySchemas.find((candidate) => candidate.id === block.entityId)
+      const kind = normalizeDashboardBlockKind(block.kind)
       const fieldExists = Boolean(block.fieldCode && schema?.fields.some((field) => field.code === block.fieldCode))
       const fieldCode = block.metric === 'count' ? '' : fieldExists ? block.fieldCode : schema?.fields[0]?.code ?? ''
+      const groupByFieldCode = kind === 'barChart'
+        ? normalizeDashboardGroupField(block.groupByFieldCode, schema)
+        : undefined
       const normalizedFilters = normalizeDashboardFilters(block.filters ?? [], schema).slice(0, 1)
       const normalizedFilterGroups = normalizeDashboardFilterGroups(block.filterGroups ?? [], schema).slice(0, 1)
       const filters = normalizedFilters
       const filterGroups = filters.length > 0 ? [] : normalizedFilterGroups
       return {
         id: block.id || createId('sum'),
+        kind,
         entityId: block.entityId,
         fieldCode,
         metric: block.metric,
-        title: String(block.title ?? '').trim() || defaultSummaryTitle(block, db),
+        chartType: kind === 'barChart' ? 'bar' as const : undefined,
+        groupByFieldCode,
+        title: String(block.title ?? '').trim() || defaultSummaryTitle({ ...block, kind, fieldCode, groupByFieldCode }, db),
         showInfo: Boolean(String(block.description ?? '').trim() || filters.length || filterGroups.length),
         description: String(block.description ?? '').trim(),
         widthPx: normalizeSummaryWidth(block),
@@ -1325,8 +1480,18 @@ function normalizeUserSettings(settings: UserSettings, db: AppDatabase): UserSet
   }
 }
 
+function normalizeDashboardBlockKind(value: unknown): DashboardBlockKind {
+  return value === 'barChart' ? 'barChart' : 'metric'
+}
+
 function normalizeDashboardThenAction(value: unknown): DashboardThenAction {
   return value === 'green' || value === 'yellow' || value === 'red' ? value : 'none'
+}
+
+function normalizeDashboardGroupField(fieldCode: unknown, schema: EntitySchema | undefined): string {
+  const code = String(fieldCode ?? '')
+  if (code && isValidDashboardGroupField(code, schema)) return code
+  return '__status'
 }
 
 function normalizeSummaryWidth(block: StoredSummaryBlock): number {
@@ -1367,12 +1532,22 @@ function isValidDashboardFilterField(fieldCode: string, schema: EntitySchema | u
   return Boolean(schema?.fields.some((field) => field.code === fieldCode))
 }
 
+function isValidDashboardGroupField(fieldCode: string, schema: EntitySchema | undefined): boolean {
+  if (fieldCode === '__status' || fieldCode === '__createdAt' || fieldCode === '__updatedAt') return true
+  return Boolean(schema?.fields.some((field) => field.code === fieldCode))
+}
+
 function defaultSummaryTitle(
-  block: Pick<DashboardSummaryBlock, 'entityId' | 'fieldCode' | 'metric'>,
+  block: Pick<DashboardSummaryBlock, 'entityId' | 'fieldCode' | 'metric'> & Partial<Pick<DashboardSummaryBlock, 'kind' | 'groupByFieldCode'>>,
   db: AppDatabase,
 ): string {
   const schema = db.entitySchemas.find((candidate) => candidate.id === block.entityId)
   const field = schema?.fields.find((candidate) => candidate.code === block.fieldCode)
+  if (block.kind === 'barChart') {
+    const groupField = schema?.fields.find((candidate) => candidate.code === block.groupByFieldCode)
+    const groupName = groupField?.name ?? (block.groupByFieldCode === '__status' ? 'статусу' : 'полю')
+    return `${schema?.name ?? 'Сущность'} · по ${groupName}`
+  }
   if (block.metric === 'count') return schema?.name ?? 'Саммари'
   return field ? `${schema?.name ?? 'Сущность'} · ${field.name}` : schema?.name ?? 'Саммари'
 }

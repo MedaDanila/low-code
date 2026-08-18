@@ -224,6 +224,16 @@ export interface Attachment {
   dataUrl?: string
 }
 
+export type AuditFieldValue = ObjectValue | DomainGeometry
+
+export interface AuditFieldChange {
+  fieldCode: string
+  fieldName: string
+  fieldType?: FieldType | 'geometry' | 'status'
+  oldValue: AuditFieldValue | null
+  newValue: AuditFieldValue | null
+}
+
 export interface AuditEvent {
   id: string
   entityId: string
@@ -233,6 +243,7 @@ export interface AuditEvent {
   kind: 'change' | 'workflow' | 'document'
   title: string
   details?: string
+  changes?: AuditFieldChange[]
 }
 
 export interface GeoValidationConflict {
@@ -256,6 +267,8 @@ export interface PlatformSettings {
 }
 
 export type SummaryMetric = 'count' | 'filled' | 'empty' | 'unique' | 'sum' | 'average'
+export type DashboardBlockKind = 'metric' | 'barChart'
+export type DashboardChartType = 'bar'
 export type DashboardThenAction = 'none' | 'green' | 'yellow' | 'red'
 export type DashboardFilterOperator =
   | 'equals'
@@ -285,9 +298,12 @@ export interface DashboardFilterGroup {
 
 export interface DashboardSummaryBlock {
   id: string
+  kind: DashboardBlockKind
   entityId: string
   fieldCode: string
   metric: SummaryMetric
+  chartType?: DashboardChartType
+  groupByFieldCode?: string
   title: string
   showInfo: boolean
   description: string

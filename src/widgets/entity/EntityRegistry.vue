@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import UiButton from '../../shared/ui/UiButton.vue'
@@ -8,12 +8,15 @@ import UiInput from '../../shared/ui/UiInput.vue'
 import UiSelect from '../../shared/ui/UiSelect.vue'
 import UiTable from '../../shared/ui/UiTable.vue'
 import UiToolbar from '../../shared/ui/UiToolbar.vue'
+import { suggestAddresses, type DadataAddressSuggestion } from '../../shared/api/dadata'
+import { resolveAddressGeometryForValues } from '../../shared/lib/addressGeometry'
 import { formatDate, formatDateTime, formatValue } from '../../shared/lib/format'
 import { matchesDashboardFilter, type DashboardFilterFieldKind } from '../../shared/lib/dashboardFilters'
 import { createId } from '../../shared/lib/id'
 import { usePermissions } from '../../shared/lib/usePermissions'
+import { useAuthStore } from '../../stores/auth'
 import { usePlatformStore } from '../../stores/platform'
-import type { DashboardFilter, DashboardFilterOperator, EntityField, EntityObject, EntitySchema } from '../../shared/types/domain'
+import type { DashboardFilter, DashboardFilterOperator, EntityField, EntityObject, EntityObjectValues, EntitySchema, ObjectValue } from '../../shared/types/domain'
 import StatusBadge from './StatusBadge.vue'
 
 const props = defineProps<{
@@ -24,6 +27,7 @@ const props = defineProps<{
 
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 const platform = usePlatformStore()
 const permissions = usePermissions()
 const search = ref('')
@@ -32,6 +36,10 @@ const filtersOpen = ref(false)
 const filters = ref<DashboardFilter[]>([])
 const openActionMenuId = ref('')
 const actionMenuStyle = ref<Record<string, string>>({})
+const spreadsheetMode = ref(false)
+const bulkSaving = ref(false)
+const bulkDrafts = ref<Record<string, EntityObjectValues>>({})
+const bulkErrors = ref<Record<string, string>>({})
 const searchInputId = computed(() => `registry-search-${props.schema.id}`)
 
 type ActiveCriteriaChip =
@@ -39,7 +47,18 @@ type ActiveCriteriaChip =
   | { id: 'status'; label: string; kind: 'status' }
   | { id: string; label: string; kind: 'filter'; filterId: string }
 
+interface BulkAddressState {
+  suggestions: DadataAddressSuggestion[]
+  loading: boolean
+  open: boolean
+}
+
+const bulkAddressStates = ref<Record<string, BulkAddressState>>({})
+const bulkAddressTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const bulkAddressAbortControllers = new Map<string, AbortController>()
+
 const visibleFields = computed(() => props.schema.fields.filter((field) => field.listVisible).sort((a, b) => a.order - b.order))
+const editableFields = computed(() => visibleFields.value.filter(isBulkEditableField))
 const filterableFields = computed(() => props.schema.fields.filter((field) => field.filterable).sort((a, b) => a.order - b.order))
 const columns = computed(() => [
   ...visibleFields.value.map((field) => ({ field: field.code, header: field.name, sortable: true })),
@@ -86,6 +105,9 @@ const filteredObjects = computed(() =>
 )
 
 const rows = computed(() => filteredObjects.value.map((object) => objectToRow(object)))
+const bulkChangedObjects = computed(() => props.objects.filter((object) => hasBulkChanges(object)))
+const bulkChangedCount = computed(() => bulkChangedObjects.value.length)
+const bulkSaveLabel = computed(() => (bulkChangedCount.value > 0 ? `Сохранить ${bulkChangedCount.value}` : 'Сохранить'))
 const resultSummary = computed(() => {
   const total = props.objects.length
   const found = filteredObjects.value.length
@@ -121,8 +143,11 @@ watch(
     filters.value = []
     filtersOpen.value = false
     openActionMenuId.value = ''
+    cancelBulkEdit()
   },
 )
+
+onBeforeUnmount(clearBulkAddressLookups)
 
 function openRow(row: Record<string, unknown>) {
   const object = row.__object as EntityObject
@@ -143,6 +168,304 @@ async function removeObject(object: EntityObject) {
   toast.add({ severity: 'success', summary: 'Запись удалена', detail: title, life: 2400 })
 }
 
+function startBulkEdit(): void {
+  spreadsheetMode.value = true
+  filtersOpen.value = false
+  openActionMenuId.value = ''
+  bulkErrors.value = {}
+  clearBulkAddressLookups()
+  bulkDrafts.value = Object.fromEntries(filteredObjects.value.map((object) => [object.id, initialBulkValues(object)]))
+}
+
+function cancelBulkEdit(): void {
+  spreadsheetMode.value = false
+  bulkSaving.value = false
+  bulkDrafts.value = {}
+  bulkErrors.value = {}
+  clearBulkAddressLookups()
+}
+
+async function saveBulkEdit(): Promise<void> {
+  if (!auth.currentUser) {
+    toast.add({ severity: 'error', summary: 'Пользователь не определён', life: 2600 })
+    return
+  }
+  if (bulkChangedCount.value === 0) return
+  if (!validateBulkRows()) {
+    toast.add({ severity: 'warn', summary: 'Проверьте обязательные поля', life: 2600 })
+    return
+  }
+
+  bulkSaving.value = true
+  try {
+    let addressFallbackCount = 0
+    const updates = []
+    for (const object of bulkChangedObjects.value) {
+      let values = nextBulkValues(object)
+      let geometry = object.geometry
+
+      if (hasBulkAddressChanges(object)) {
+        try {
+          const resolved = await resolveAddressGeometryForValues(props.schema, values)
+          values = resolved.values
+          geometry = resolved.geometry
+        } catch (cause) {
+          if ((cause as DOMException).name === 'AbortError') throw cause
+          addressFallbackCount += 1
+        }
+      }
+
+      updates.push({
+        id: object.id,
+        values,
+        geometry,
+        actorId: auth.currentUser.id,
+      })
+    }
+    await platform.updateObjects(updates)
+    toast.add({
+      severity: 'success',
+      summary: 'Изменения сохранены',
+      detail: addressFallbackCount > 0
+        ? `${updates.length} объектов, ${addressFallbackCount} адресов без обновления геометрии`
+        : `${updates.length} объектов`,
+      life: 3200,
+    })
+    cancelBulkEdit()
+  } finally {
+    bulkSaving.value = false
+  }
+}
+
+function validateBulkRows(): boolean {
+  const errors: Record<string, string> = {}
+  bulkChangedObjects.value.forEach((object) => {
+    const values = nextBulkValues(object)
+    editableFields.value.forEach((field) => {
+      if (field.required && isEmptyValue(values[field.code])) {
+        errors[bulkErrorKey(object.id, field.code)] = 'Обязательное поле'
+      }
+    })
+  })
+  bulkErrors.value = errors
+  return Object.keys(errors).length === 0
+}
+
+function initialBulkValues(object: EntityObject): EntityObjectValues {
+  const values: EntityObjectValues = JSON.parse(JSON.stringify(object.values))
+  props.schema.fields.forEach((field) => {
+    if (!(field.code in values)) values[field.code] = defaultBulkValue(field)
+  })
+  return values
+}
+
+function nextBulkValues(object: EntityObject): EntityObjectValues {
+  const draft = bulkDrafts.value[object.id] ?? initialBulkValues(object)
+  const values: EntityObjectValues = JSON.parse(JSON.stringify(object.values))
+  editableFields.value.forEach((field) => {
+    values[field.code] = field.code in draft ? draft[field.code] : defaultBulkValue(field)
+  })
+  return values
+}
+
+function hasBulkChanges(object: EntityObject): boolean {
+  const draft = bulkDrafts.value[object.id]
+  if (!draft) return false
+  return editableFields.value.some((field) => !bulkValuesEqual(object.values[field.code] ?? defaultBulkValue(field), draft[field.code]))
+}
+
+function bulkCellValue(object: EntityObject, field: EntityField): ObjectValue {
+  const draft = bulkDrafts.value[object.id]
+  if (!draft) return object.values[field.code] ?? defaultBulkValue(field)
+  return field.code in draft ? draft[field.code] : defaultBulkValue(field)
+}
+
+function bulkTextValue(object: EntityObject, field: EntityField): string {
+  const value = bulkCellValue(object, field)
+  if (value === null || value === undefined) return ''
+  if (Array.isArray(value)) return value.join(', ')
+  return String(value)
+}
+
+function bulkDateValue(object: EntityObject, field: EntityField): string {
+  const value = bulkCellValue(object, field)
+  if (typeof value !== 'string') return ''
+  if (field.type === 'datetime') return value.slice(0, 16)
+  return value.slice(0, 10)
+}
+
+function updateBulkAddressInput(object: EntityObject, field: EntityField, event: Event): void {
+  const value = (event.target as HTMLInputElement).value
+  setBulkValue(object, field, value)
+  queueBulkAddressSuggestions(object, field, value)
+}
+
+function focusBulkAddressField(object: EntityObject, field: EntityField): void {
+  const value = bulkTextValue(object, field)
+  setBulkAddressState(bulkAddressKey(object.id, field.code), { open: true })
+  queueBulkAddressSuggestions(object, field, value)
+}
+
+function blurBulkAddressField(object: EntityObject, field: EntityField): void {
+  const key = bulkAddressKey(object.id, field.code)
+  window.setTimeout(() => setBulkAddressState(key, { open: false }), 120)
+}
+
+function selectBulkAddressSuggestion(
+  object: EntityObject,
+  field: EntityField,
+  suggestion: DadataAddressSuggestion,
+): void {
+  const key = bulkAddressKey(object.id, field.code)
+  clearBulkAddressRequest(key)
+  setBulkValue(object, field, suggestion.value)
+  setBulkAddressState(key, { suggestions: [], loading: false, open: false })
+}
+
+function queueBulkAddressSuggestions(object: EntityObject, field: EntityField, query: string): void {
+  const key = bulkAddressKey(object.id, field.code)
+  clearBulkAddressRequest(key)
+
+  if (query.trim().length < 3) {
+    setBulkAddressState(key, { suggestions: [], loading: false, open: true })
+    return
+  }
+
+  const timer = window.setTimeout(async () => {
+    const controller = new AbortController()
+    bulkAddressAbortControllers.set(key, controller)
+    setBulkAddressState(key, { loading: true, open: true })
+    try {
+      const suggestions = await suggestAddresses(query, controller.signal)
+      if (bulkAddressAbortControllers.get(key) !== controller) return
+      setBulkAddressState(key, { suggestions, loading: false, open: true })
+    } catch {
+      if (bulkAddressAbortControllers.get(key) !== controller) return
+      setBulkAddressState(key, { suggestions: [], loading: false, open: true })
+    } finally {
+      if (bulkAddressAbortControllers.get(key) === controller) bulkAddressAbortControllers.delete(key)
+    }
+  }, 240)
+
+  bulkAddressTimers.set(key, timer)
+}
+
+function bulkAddressState(object: EntityObject, field: EntityField): BulkAddressState {
+  return bulkAddressStates.value[bulkAddressKey(object.id, field.code)] ?? {
+    suggestions: [],
+    loading: false,
+    open: false,
+  }
+}
+
+function setBulkAddressState(key: string, patch: Partial<BulkAddressState>): void {
+  const current = bulkAddressStates.value[key]
+  bulkAddressStates.value = {
+    ...bulkAddressStates.value,
+    [key]: {
+      suggestions: patch.suggestions ?? current?.suggestions ?? [],
+      loading: patch.loading ?? current?.loading ?? false,
+      open: patch.open ?? current?.open ?? false,
+    },
+  }
+}
+
+function clearBulkAddressRequest(key: string): void {
+  const timer = bulkAddressTimers.get(key)
+  if (timer) window.clearTimeout(timer)
+  bulkAddressTimers.delete(key)
+  bulkAddressAbortControllers.get(key)?.abort()
+  bulkAddressAbortControllers.delete(key)
+}
+
+function clearBulkAddressLookups(): void {
+  Array.from(bulkAddressTimers.keys()).forEach(clearBulkAddressRequest)
+  bulkAddressStates.value = {}
+}
+
+function bulkAddressKey(objectId: string, fieldCode: string): string {
+  return `${objectId}:${fieldCode}`
+}
+
+function updateBulkInput(object: EntityObject, field: EntityField, event: Event): void {
+  const target = event.target as HTMLInputElement | HTMLSelectElement
+  const rawValue = target.value
+  let value: ObjectValue = rawValue
+
+  if (field.type === 'integer') value = rawValue === '' ? null : Number.parseInt(rawValue, 10)
+  if (field.type === 'decimal') value = rawValue === '' ? null : Number(rawValue)
+  if (field.type === 'date') value = rawValue || null
+  if (field.type === 'datetime') value = rawValue ? (rawValue.length === 16 ? `${rawValue}:00` : rawValue) : null
+  if (field.type === 'enum' || field.type === 'reference') value = rawValue || null
+
+  setBulkValue(object, field, value)
+}
+
+function updateBulkBoolean(object: EntityObject, field: EntityField, event: Event): void {
+  setBulkValue(object, field, (event.target as HTMLInputElement).checked)
+}
+
+function setBulkValue(object: EntityObject, field: EntityField, value: ObjectValue): void {
+  const current = bulkDrafts.value[object.id] ?? initialBulkValues(object)
+  bulkDrafts.value = {
+    ...bulkDrafts.value,
+    [object.id]: {
+      ...current,
+      [field.code]: value,
+    },
+  }
+  const key = bulkErrorKey(object.id, field.code)
+  if (bulkErrors.value[key] && !(field.required && isEmptyValue(value))) {
+    const { [key]: _removed, ...nextErrors } = bulkErrors.value
+    bulkErrors.value = nextErrors
+  }
+}
+
+function bulkSelectOptions(field: EntityField): Array<{ label: string; value: string }> {
+  if (field.type === 'enum') {
+    return platform.dictionaryById(field.enumId)?.items
+      .filter((item) => item.active)
+      .map((item) => ({ label: item.name, value: item.code })) ?? []
+  }
+  if (field.type === 'reference') {
+    if (field.referenceEntityId) {
+      return platform.objectsByEntity(field.referenceEntityId)
+        .map((object) => ({ label: referenceObjectLabel(object), value: object.id }))
+    }
+    return platform.activeSchemas.map((schema) => ({ label: schema.name, value: schema.id }))
+  }
+  return []
+}
+
+function hasBulkAddressChanges(object: EntityObject): boolean {
+  return props.schema.fields
+    .filter((field) => field.type === 'address')
+    .some((field) => String(object.values[field.code] ?? '').trim() !== String(nextBulkValues(object)[field.code] ?? '').trim())
+}
+
+function isBulkEditableField(field: EntityField): boolean {
+  return field.type !== 'file'
+}
+
+function defaultBulkValue(field: EntityField): ObjectValue {
+  if (field.type === 'boolean') return false
+  if (field.type === 'integer' || field.type === 'decimal') return null
+  if (field.type === 'file') return []
+  return ''
+}
+
+function isEmptyValue(value: ObjectValue): boolean {
+  return value === null || value === '' || (Array.isArray(value) && value.length === 0)
+}
+
+function bulkValuesEqual(left: ObjectValue, right: ObjectValue): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+}
+
+function bulkErrorKey(objectId: string, fieldCode: string): string {
+  return `${objectId}:${fieldCode}`
+}
+
 function toggleActionMenu(objectId: string, event: MouseEvent) {
   openActionMenuId.value = openActionMenuId.value === objectId ? '' : objectId
   if (!openActionMenuId.value) return
@@ -158,6 +481,16 @@ function objectTitle(object: EntityObject): string {
   return String(object.values.name ?? object.values.title ?? object.values.address ?? object.id)
 }
 
+function referenceObjectLabel(object: EntityObject): string {
+  return String(
+    object.values.name
+    ?? object.values.title
+    ?? object.values.number
+    ?? object.values.address
+    ?? object.id,
+  )
+}
+
 function objectToRow(object: EntityObject): Record<string, unknown> {
   const row: Record<string, unknown> = { id: object.id, status: object.status, __object: object }
   visibleFields.value.forEach((field) => {
@@ -169,8 +502,10 @@ function objectToRow(object: EntityObject): Record<string, unknown> {
 function formattedFieldValue(object: EntityObject, field: EntityField): string {
   const raw = object.values[field.code]
   const enumLabel = platform.dictionaryById(field.enumId)?.items.find((item) => item.code === raw)?.name
+  const referenceObject = field.type === 'reference' && typeof raw === 'string' ? platform.objectById(raw) : undefined
+  const referenceLabel = referenceObject ? referenceObjectLabel(referenceObject) : undefined
   if (field.type === 'datetime' && typeof raw === 'string') return formatDateTime(raw)
-  return String(field.type === 'date' ? formatDate(raw) : enumLabel ?? formatValue(raw))
+  return String(field.type === 'date' ? formatDate(raw) : enumLabel ?? referenceLabel ?? formatValue(raw))
 }
 
 function addFilter(): void {
@@ -299,6 +634,10 @@ function filterValueOptions(filter: DashboardFilter): Array<{ label: string; val
       .filter((item) => item.active)
       .map((item) => ({ label: item.name, value: item.code })) ?? []
   }
+  if (kind === 'enum' && field?.type === 'reference' && field.referenceEntityId) {
+    return platform.objectsByEntity(field.referenceEntityId)
+      .map((object) => ({ label: referenceObjectLabel(object), value: object.id }))
+  }
 
   return []
 }
@@ -408,13 +747,33 @@ function safeFileName(value: string): string {
             </div>
           </div>
           <div class="registry-toolbar__actions">
-            <UiButton
-              v-if="permissions.can('create', schema.id)"
-              label="Создать объект"
-              icon="pi pi-plus"
-              @click="createObject"
-            />
-            <UiButton label="Экспорт" icon="pi pi-download" severity="secondary" variant="outlined" @click="exportRows" />
+            <template v-if="spreadsheetMode">
+              <UiButton label="Отмена" icon="pi pi-times" severity="secondary" variant="outlined" @click="cancelBulkEdit" />
+              <UiButton
+                :label="bulkSaveLabel"
+                icon="pi pi-save"
+                :loading="bulkSaving"
+                :disabled="bulkChangedCount === 0"
+                @click="saveBulkEdit"
+              />
+            </template>
+            <template v-else>
+              <UiButton
+                v-if="permissions.can('edit', schema.id)"
+                label="Таблица"
+                icon="pi pi-table"
+                severity="secondary"
+                variant="outlined"
+                @click="startBulkEdit"
+              />
+              <UiButton
+                v-if="permissions.can('create', schema.id)"
+                label="Создать объект"
+                icon="pi pi-plus"
+                @click="createObject"
+              />
+              <UiButton label="Экспорт" icon="pi pi-download" severity="secondary" variant="outlined" @click="exportRows" />
+            </template>
           </div>
         </div>
 
@@ -513,6 +872,116 @@ function safeFileName(value: string): string {
       :title="emptyTitle"
       :description="emptyDescription"
     />
+    <div v-else-if="spreadsheetMode" class="registry-sheet">
+      <table>
+        <thead>
+          <tr>
+            <th class="registry-sheet__row-title">Запись</th>
+            <th v-for="field in visibleFields" :key="field.id">
+              {{ field.name }}
+            </th>
+            <th class="registry-sheet__status">Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="(object, index) in filteredObjects"
+            :key="object.id"
+            :class="{ 'is-changed': hasBulkChanges(object) }"
+          >
+            <td class="registry-sheet__row-title">
+              <button type="button" @click="openRow({ __object: object })">
+                {{ index + 1 }}. {{ objectTitle(object) }}
+              </button>
+            </td>
+            <td v-for="field in visibleFields" :key="field.id">
+              <div
+                v-if="isBulkEditableField(field)"
+                class="registry-sheet__cell"
+                :class="{ 'is-invalid': bulkErrors[bulkErrorKey(object.id, field.code)] }"
+              >
+                <input
+                  v-if="field.type === 'string' || field.type === 'text'"
+                  class="registry-sheet__input"
+                  type="text"
+                  :value="bulkTextValue(object, field)"
+                  @input="updateBulkInput(object, field, $event)"
+                />
+                <div v-else-if="field.type === 'address'" class="registry-sheet-address">
+                  <input
+                    class="registry-sheet__input"
+                    type="text"
+                    autocomplete="off"
+                    :value="bulkTextValue(object, field)"
+                    @input="updateBulkAddressInput(object, field, $event)"
+                    @focus="focusBulkAddressField(object, field)"
+                    @blur="blurBulkAddressField(object, field)"
+                  />
+                  <div
+                    v-if="bulkAddressState(object, field).open && (bulkAddressState(object, field).suggestions.length > 0 || bulkAddressState(object, field).loading)"
+                    class="registry-sheet-address__menu"
+                  >
+                    <div v-if="bulkAddressState(object, field).loading" class="registry-sheet-address__loading">
+                      Ищем адрес...
+                    </div>
+                    <button
+                      v-for="suggestion in bulkAddressState(object, field).suggestions"
+                      :key="suggestion.unrestrictedValue"
+                      class="registry-sheet-address__option"
+                      type="button"
+                      @mousedown.prevent="selectBulkAddressSuggestion(object, field, suggestion)"
+                    >
+                      {{ suggestion.value }}
+                    </button>
+                  </div>
+                </div>
+                <input
+                  v-else-if="field.type === 'integer' || field.type === 'decimal'"
+                  class="registry-sheet__input"
+                  type="number"
+                  :step="field.type === 'decimal' ? '0.01' : '1'"
+                  :value="bulkTextValue(object, field)"
+                  @input="updateBulkInput(object, field, $event)"
+                />
+                <label v-else-if="field.type === 'boolean'" class="registry-sheet__checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="bulkCellValue(object, field) === true"
+                    @change="updateBulkBoolean(object, field, $event)"
+                  />
+                  <span>{{ bulkCellValue(object, field) === true ? 'Да' : 'Нет' }}</span>
+                </label>
+                <input
+                  v-else-if="field.type === 'date' || field.type === 'datetime'"
+                  class="registry-sheet__input"
+                  :type="field.type === 'datetime' ? 'datetime-local' : 'date'"
+                  :value="bulkDateValue(object, field)"
+                  @input="updateBulkInput(object, field, $event)"
+                />
+                <select
+                  v-else-if="field.type === 'enum' || field.type === 'reference'"
+                  class="registry-sheet__input"
+                  :value="bulkTextValue(object, field)"
+                  @change="updateBulkInput(object, field, $event)"
+                >
+                  <option value=""></option>
+                  <option v-for="option in bulkSelectOptions(field)" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span v-if="bulkErrors[bulkErrorKey(object.id, field.code)]" class="registry-sheet__error">
+                  {{ bulkErrors[bulkErrorKey(object.id, field.code)] }}
+                </span>
+              </div>
+              <span v-else>{{ formattedFieldValue(object, field) }}</span>
+            </td>
+            <td class="registry-sheet__status">
+              <StatusBadge :status="String(object.status ?? '')" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <UiTable
       v-else
       :rows="rows"
@@ -828,6 +1297,177 @@ function safeFileName(value: string): string {
   border-color: #93c5fd;
   outline: none;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.registry-sheet {
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.registry-sheet table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.registry-sheet th,
+.registry-sheet td {
+  width: 190px;
+  min-width: 190px;
+  padding: 8px;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.registry-sheet th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.registry-sheet tbody tr.is-changed td {
+  background: #f0f9ff;
+}
+
+.registry-sheet__row-title {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 260px;
+  min-width: 260px;
+  background: var(--color-surface);
+}
+
+th.registry-sheet__row-title {
+  z-index: 4;
+  background: var(--color-surface-muted);
+}
+
+.registry-sheet tbody tr.is-changed td.registry-sheet__row-title {
+  background: #f0f9ff;
+}
+
+.registry-sheet__row-title button {
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.registry-sheet__row-title button:hover,
+.registry-sheet__row-title button:focus-visible {
+  color: #1d4ed8;
+  outline: none;
+}
+
+.registry-sheet__status {
+  width: 150px;
+  min-width: 150px;
+}
+
+.registry-sheet__cell {
+  display: grid;
+  gap: 4px;
+}
+
+.registry-sheet-address {
+  position: relative;
+}
+
+.registry-sheet-address__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+}
+
+.registry-sheet-address__loading,
+.registry-sheet-address__option {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.registry-sheet-address__loading {
+  color: var(--color-text-secondary);
+}
+
+.registry-sheet-address__option {
+  cursor: pointer;
+}
+
+.registry-sheet-address__option:hover,
+.registry-sheet-address__option:focus-visible {
+  background: var(--color-accent-soft);
+  outline: none;
+}
+
+.registry-sheet__input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.registry-sheet__input:focus {
+  border-color: #93c5fd;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.registry-sheet__cell.is-invalid .registry-sheet__input {
+  border-color: #ef4444;
+}
+
+.registry-sheet__checkbox {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.registry-sheet__error {
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .registry-actions {

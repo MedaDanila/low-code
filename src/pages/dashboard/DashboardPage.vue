@@ -26,11 +26,19 @@ interface SummaryView {
   title: string
   value: string
   thenAction: DashboardThenAction
+  bars: SummaryChartBar[]
 }
 
 interface SummaryGroup {
   schema: EntitySchema
   blocks: SummaryView[]
+}
+
+interface SummaryChartBar {
+  label: string
+  value: number
+  formattedValue: string
+  widthPercent: number
 }
 
 const router = useRouter()
@@ -75,6 +83,7 @@ const summaryGroups = computed<SummaryGroup[]>(() => {
       title: block.title || defaultSummaryTitle(block, schema),
       value: calculateSummaryValue(block),
       thenAction: summaryThenAction(block),
+      bars: chartBars(block),
     })
   })
 
@@ -87,7 +96,10 @@ function calculateSummaryValue(block: DashboardSummaryBlock): string {
 }
 
 function calculateSummaryRawValue(block: DashboardSummaryBlock): number | null {
-  const objects = filteredObjects(block)
+  return calculateMetricRawValue(block, filteredObjects(block))
+}
+
+function calculateMetricRawValue(block: DashboardSummaryBlock, objects: EntityObject[]): number | null {
   if (block.metric === 'count') return objects.length
 
   const values = objects.map((object) => object.values[block.fieldCode])
@@ -116,9 +128,66 @@ function isFilled(value: ObjectValue | undefined): boolean {
 }
 
 function defaultSummaryTitle(block: DashboardSummaryBlock, schema: EntitySchema): string {
+  if (block.kind === 'barChart') {
+    const groupLabel = groupFieldLabel(block.entityId, validGroupFieldCode(block.entityId, block.groupByFieldCode))
+    return `${schema.name} · по ${groupLabel.toLocaleLowerCase('ru-RU')}`
+  }
   if (block.metric === 'count') return schema.name
   const fieldName = schema.fields.find((field) => field.code === block.fieldCode)?.name
   return fieldName ? `${schema.name} · ${fieldName}` : schema.name
+}
+
+function chartBars(block: DashboardSummaryBlock): SummaryChartBar[] {
+  if (block.kind !== 'barChart') return []
+  const buckets = new Map<string, { label: string; objects: EntityObject[] }>()
+  const groupFieldCode = validGroupFieldCode(block.entityId, block.groupByFieldCode)
+
+  filteredObjects(block).forEach((object) => {
+    const label = groupValueLabel(block, object, groupFieldCode)
+    const bucket = buckets.get(label) ?? { label, objects: [] }
+    bucket.objects.push(object)
+    buckets.set(label, bucket)
+  })
+
+  const values = Array.from(buckets.values())
+    .map((bucket) => ({
+      label: bucket.label,
+      value: calculateMetricRawValue(block, bucket.objects) ?? 0,
+    }))
+    .filter((bar) => Number.isFinite(bar.value))
+    .sort((left, right) => right.value - left.value)
+    .slice(0, 8)
+
+  const maxValue = Math.max(...values.map((bar) => bar.value), 0)
+  return values.map((bar) => ({
+    ...bar,
+    formattedValue: formatNumber(bar.value),
+    widthPercent: maxValue > 0 ? Math.max(4, Math.round((bar.value / maxValue) * 100)) : 0,
+  }))
+}
+
+function groupValueLabel(block: DashboardSummaryBlock, object: EntityObject, fieldCode: string): string {
+  if (fieldCode === '__status') return statusOptions(block.entityId).find((option) => option.value === object.status)?.label ?? object.status ?? 'Без статуса'
+  if (fieldCode === '__createdAt') return object.createdAt.slice(0, 10)
+  if (fieldCode === '__updatedAt') return object.updatedAt.slice(0, 10)
+
+  const field = fieldByCode(block.entityId, fieldCode)
+  const value = object.values[fieldCode]
+  if (!isFilled(value)) return 'Не указано'
+  if (field?.type === 'boolean') return value === true ? 'Да' : 'Нет'
+  if (field?.type === 'enum') {
+    return platform.dictionaryById(field.enumId)?.items.find((item) => item.code === value)?.name ?? String(value)
+  }
+  if (field?.type === 'reference' && typeof value === 'string') {
+    const referenceObject = platform.objectById(value)
+    return referenceObject ? objectTitle(referenceObject) : value
+  }
+  if (field?.type === 'date' || field?.type === 'datetime') return String(value).slice(0, 10)
+  return String(value)
+}
+
+function objectTitle(object: EntityObject): string {
+  return String(object.values.name ?? object.values.title ?? object.values.number ?? object.values.address ?? object.id)
 }
 
 function formatNumber(value: number): string {
@@ -142,7 +211,8 @@ function blockMinWidthPx(block: DashboardSummaryBlock): number {
   const title = (block.title || (schema ? defaultSummaryTitle(block, schema) : '')).trim() || 'Название блока'
   const textWidth = measureTitleWidth(title)
   const controlWidth = hasSummaryInfo(block) ? 62 : 32
-  return snapSummaryWidth(Math.max(160, textWidth + controlWidth))
+  const baseWidth = block.kind === 'barChart' ? 360 : 160
+  return snapSummaryWidth(Math.max(baseWidth, textWidth + controlWidth))
 }
 
 function measureTitleWidth(title: string): number {
@@ -276,6 +346,19 @@ function fieldByCode(entityId: string, fieldCode: string): EntityField | undefin
   return platform.schemaById(entityId)?.fields.find((field) => field.code === fieldCode)
 }
 
+function groupFieldLabel(entityId: string, fieldCode: string): string {
+  if (fieldCode === '__status') return 'Статус'
+  if (fieldCode === '__createdAt') return 'Дата создания'
+  if (fieldCode === '__updatedAt') return 'Дата изменения'
+  return fieldByCode(entityId, fieldCode)?.name ?? 'Поле'
+}
+
+function validGroupFieldCode(entityId: string, fieldCode?: string): string {
+  if (fieldCode === '__status' || fieldCode === '__createdAt' || fieldCode === '__updatedAt') return fieldCode
+  if (fieldCode && fieldByCode(entityId, fieldCode)) return fieldCode
+  return '__status'
+}
+
 function filterFieldKind(block: DashboardSummaryBlock, fieldCode: string): DashboardFilterFieldKind {
   if (fieldCode === SUMMARY_VALUE_FIELD_CODE) return 'number'
   if (fieldCode === '__createdAt' || fieldCode === '__updatedAt') return 'date'
@@ -374,8 +457,8 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
 
     <UiEmptyState
       v-else-if="summaryGroups.length === 0"
-      title="Саммари не настроены"
-      description="Добавьте блоки для главного экрана в настройках."
+      title="Виджеты не настроены"
+      description="Добавьте показатели или графики для главного экрана в настройках."
     >
       <UiButton label="Настроить" icon="pi pi-cog" @click="router.push('/admin/home')" />
     </UiEmptyState>
@@ -392,6 +475,7 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
             :key="summary.block.id"
             class="summary-card"
             :class="{
+              'summary-card--chart': summary.block.kind === 'barChart',
               'summary-card--has-info': hasSummaryInfo(summary.block),
               'summary-card--then-green': summary.thenAction === 'green',
               'summary-card--then-yellow': summary.thenAction === 'yellow',
@@ -408,8 +492,23 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
               <Info :size="14" />
               <span class="summary-card__tooltip">{{ summaryInfoText(summary.block) }}</span>
             </button>
-            <span class="summary-card__title">{{ summary.title }}</span>
-            <strong>{{ summary.value }}</strong>
+            <template v-if="summary.block.kind === 'barChart'">
+              <span class="summary-card__title">{{ summary.title }}</span>
+              <div class="summary-chart">
+                <div v-if="summary.bars.length === 0" class="summary-chart__empty">Нет данных</div>
+                <div v-for="bar in summary.bars" :key="bar.label" class="summary-chart__row">
+                  <span>{{ bar.label }}</span>
+                  <div class="summary-chart__track">
+                    <i :style="{ width: `${bar.widthPercent}%` }" />
+                  </div>
+                  <strong>{{ bar.formattedValue }}</strong>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <span class="summary-card__title">{{ summary.title }}</span>
+              <strong>{{ summary.value }}</strong>
+            </template>
           </article>
         </div>
       </section>
@@ -597,13 +696,71 @@ function filteredObjects(block: DashboardSummaryBlock): EntityObject[] {
   white-space: nowrap;
 }
 
-.summary-card strong {
+.summary-card > strong {
   display: block;
   align-self: center;
   justify-self: center;
   text-align: center;
   font-size: 30px;
   line-height: 1;
+}
+
+.summary-card--chart {
+  min-height: 220px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.summary-chart {
+  display: grid;
+  gap: 8px;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.summary-chart__row {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.9fr) minmax(90px, 1.6fr) 44px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.summary-chart__row > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-chart__row strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: right;
+}
+
+.summary-chart__track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+}
+
+.summary-chart__track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.summary-chart__empty {
+  align-self: center;
+  justify-self: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 @media (max-width: 1180px) {
